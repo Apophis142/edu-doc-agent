@@ -1,0 +1,14 @@
+*                       @Apophis142
+
+# Модули — по ответственным
+/src/edu_doc_agent/parsing/       @sk7rex
+/src/edu_doc_agent/extraction/    @sk7rex @kimnas1
+/src/edu_doc_agent/orchestration/ @kimnas1 @RomanEpishkin
+/src/edu_doc_agent/api/           @RomanEpishkin
+/src/edu_doc_agent/ui/            @RomanEpishkin
+
+# Документация — PM
+/docs/                  @Apophis142
+/mkdocs.yml             @Apophis142
+/CONTRIBUTING.md        @Apophis142
+/README.md              @Apophis142

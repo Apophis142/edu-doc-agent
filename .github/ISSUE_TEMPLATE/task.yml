@@ -1,0 +1,71 @@
+name: Задача
+description: Новая функциональность или доработка
+title: "[Task] "
+labels: ["type: feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо за задачу! Пожалуйста, заполни все обязательные поля.
+
+  - type: textarea
+    id: goal
+    attributes:
+      label: Что нужно сделать и зачем
+      description: 2–5 предложений. Не как, а что и ради чего.
+      placeholder: |
+        Например: реализовать парсер таблиц из DOCX,
+        чтобы извлекать учебный план из приложений РПД.
+    validations:
+      required: true
+
+  - type: textarea
+    id: done
+    attributes:
+      label: Критерии готовности
+      description: Проверяемые пункты. Если нельзя проверить — переформулируй.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Модуль
+      options:
+        - parsing
+        - extraction
+        - retrieval
+        - validation
+        - generation
+        - report
+        - orchestration
+        - api
+        - ui
+        - infra
+        - docs
+    validations:
+      required: true
+
+  - type: dropdown
+    id: milestone
+    attributes:
+      label: Веха
+      options:
+        - M1. Данные и модель
+        - M2. Сквозной скелет
+        - M3. Основные проверки и метрики
+        - M4. Демо
+        - Backlog (без вехи)
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Дополнительно
+      description: Ссылки на документы, зависимости от других задач, риски.
+    validations:
+      required: false

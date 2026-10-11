@@ -1,0 +1,46 @@
+site_name: edu-doc-agent
+site_description: Агентная ИИ-система проверки учебно-методических документов
+site_url: https://apophis142.github.io/edu-doc-agent/
+repo_url: https://github.com/Apophis142/edu-doc-agent
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  language: ru
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.highlight
+  palette:
+    - scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Тёмная тема
+    - scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Светлая тема
+
+markdown_extensions:
+  - admonition
+  - tables
+  - attr_list
+  - pymdownx.details
+  - toc:
+      permalink: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Главная: index.md
+  - Разбор проекта: project-review.md
+  - Архитектура: architecture.md
+  - Как мы работаем: contributing.md
+  - Решения (ADR): adr/index.md

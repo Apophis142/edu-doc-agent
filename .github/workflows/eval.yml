@@ -1,0 +1,41 @@
+name: Eval
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Модель для прогона"
+        required: true
+        default: "default"
+      dataset:
+        description: "Путь к датасету внутри репозитория"
+        required: true
+        default: "eval/fixtures"
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    env:
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+      MODEL: ${{ inputs.model }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: |
+          uv run python -m edu_doc_agent.eval.run \
+            --dataset "${{ inputs.dataset }}" \
+            --model "$MODEL" \
+            --out eval-report
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eval-report-${{ inputs.model }}
+          path: eval-report
+          if-no-files-found: error
+          retention-days: 30

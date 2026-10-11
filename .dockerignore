@@ -1,0 +1,49 @@
+# VCS / CI / IDE
+.git
+.gitignore
+.gitattributes
+.github
+.idea
+.vscode
+*.swp
+
+# Python caches and environment
+.venv
+__pycache__
+*.py[cod]
+*.egg-info
+.ruff_cache
+.pytest_cache
+.mypy_cache
+.coverage
+htmlcov
+
+# secrets
+.env
+.env.*
+!.env.example
+
+# data and artifacts
+data
+storage
+models
+*.gguf
+*.safetensors
+
+# not needed in docker image
+notebooks
+docs
+site
+tests
+eval
+
+# metafiles not needed in docker image
+.pre-commit-config.yaml
+mkdocs.yml
+.editorconfig
+CONTRIBUTING.md
+Makefile
+
+# System
+.DS_Store
+Thumbs.db

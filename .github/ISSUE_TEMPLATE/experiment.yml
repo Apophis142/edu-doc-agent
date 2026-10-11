@@ -1,0 +1,57 @@
+name: Эксперимент
+description: Исследование, бенчмарк, сравнение подходов
+title: "[Exp] "
+labels: ["type: experiment"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ветка будет `exp/<номер-issue>-<коротко>`. Результат — в описании PR или в комментарии к issue.
+        Сливать в `main` не обязательно.
+
+  - type: textarea
+    id: hypothesis
+    attributes:
+      label: Гипотеза
+      description: Что проверяем и почему считаем, что это может сработать.
+    validations:
+      required: true
+
+  - type: textarea
+    id: method
+    attributes:
+      label: Как проверяем
+      description: Данные, модели, промпты, набор метрик, как будем измерять.
+    validations:
+      required: true
+
+  - type: textarea
+    id: metric
+    attributes:
+      label: Метрика успеха
+      description: Число или порог, при котором считаем гипотезу подтверждённой.
+      placeholder: "Например: exact match по извлечению компетенций ≥ 0.85 на 30 синтетических РПД"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Модуль
+      options:
+        - parsing
+        - extraction
+        - retrieval
+        - validation
+        - generation
+        - orchestration
+    validations:
+      required: true
+
+  - type: textarea
+    id: results
+    attributes:
+      label: Результаты и выводы
+      description: Заполняется после прогона. Что получилось, что нет, что дальше.
+    validations:
+      required: false

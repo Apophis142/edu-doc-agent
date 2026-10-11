@@ -1,0 +1,68 @@
+name: Баг
+description: Что-то работает не так
+title: "[Bug] "
+labels: ["type: bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Что пошло не так
+      description: Опиши наблюдаемое поведение.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Что ожидалось
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Как воспроизвести
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+        Ожидаемый результат: ...
+        Фактический результат: ...
+    validations:
+      required: true
+
+  - type: input
+    id: commit
+    attributes:
+      label: Версия / коммит
+      description: Хэш коммита или тег
+      placeholder: "v0.1.0 / a1b2c3d"
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Логи / скриншоты / трейсбек
+      render: shell
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Модуль
+      options:
+        - parsing
+        - extraction
+        - retrieval
+        - validation
+        - generation
+        - report
+        - orchestration
+        - api
+        - ui
+        - infra
+        - docs
+    validations:
+      required: true

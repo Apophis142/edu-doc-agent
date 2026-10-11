@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Секреты — в git попадает только .env.example
+.env
+.env.*
+!.env.example
+
+# Данные и артефакты
+data/*
+!data/README.md
+storage/*
+!storage/README.md
+models/
+*.gguf
+*.safetensors
+*.bin
+
+# Ноутбуки
+.ipynb_checkpoints/
+
+# Документация (собирается в CI)
+site/
+.cache/
+
+# IDE / ОС
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Логи
+*.log
