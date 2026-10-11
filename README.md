@@ -63,7 +63,7 @@ data/                реальные документы — вне git
 | Data Science | | |
 | Data Science | | |
 | Data Science | | |
-| Backend | | |
+| Backend | Епишкин Роман | @oxxytentacion |
 
 ## Документация
 
