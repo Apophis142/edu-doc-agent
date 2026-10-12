@@ -60,7 +60,7 @@ data/                реальные документы — вне git
 | Роль | Имя | Контакты |
 | --- | --- | --- |
 | PM, тестировщик | Грязнов Эдуард | @apophis142 |
-| Data Science | | |
+| Data Science | Подтуров Павел | @clerdmy |
 | Data Science | | |
 | Data Science | | |
 | Backend | Епишкин Роман | @oxxytentacion |
