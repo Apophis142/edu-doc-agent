@@ -4,9 +4,9 @@
 чтобы в протоколе проверки можно было сослаться на источник.
 """
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 OutcomeKind = Literal["знает", "умеет", "владеет"]
 DocKind = Literal["discipline", "practice"]
@@ -44,15 +44,40 @@ class LearningOutcome(_Model):
         default=None, description="Например, «ПКП-ППК-ОС3.1. З-1»; может не быть"
     )
     indicator_code: str | None = None
-    competence_code: str | None = None
+    competence_codes: list[str] = Field(
+        default_factory=list,
+        description="Компетенции, которым принадлежит результат; несколько — если ячейка "
+        "результатов объединена по вертикали на группу компетенций",
+    )
     text: str
     source: SourceRef
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_legacy_competence_code(cls, data: Any) -> Any:
+        """Старый формат: одно `competence_code` вместо списка `competence_codes`."""
+        if isinstance(data, dict) and "competence_code" in data:
+            data = dict(data)
+            legacy = data.pop("competence_code")
+            if "competence_codes" not in data:
+                data["competence_codes"] = [legacy] if legacy else []
+        return data
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def competence_code(self) -> str | None:
+        """Устарело: первая из `competence_codes`. Оставлено для обратной совместимости."""
+        return self.competence_codes[0] if self.competence_codes else None
 
 
 class AssessmentLink(_Model):
     """Строка таблицы «индикатор → контрольно-измерительные материалы»."""
 
     indicator_code: str | None = None
+    competence_code: str | None = Field(
+        default=None,
+        description="Если строка КИМ относится к компетенции целиком, а не к индикатору",
+    )
     indicator_text: str | None = None
     materials_raw: str
     materials: list[str] = Field(default_factory=list)
@@ -70,6 +95,11 @@ class Attestation(_Model):
 
 class ControlForm(_Model):
     semester: int
+    trajectory: str | None = Field(
+        default=None,
+        description="Траектория как в документе: «ОСНОВНАЯ ТРАЕКТОРИЯ Профиль ТОП-ИТ ПРО»",
+    )
+    study_form: str | None = Field(default=None, description="очная / заочная / очно-заочная")
     current: list[str] = Field(default_factory=list, description="Формы текущего контроля")
     intermediate: list[Attestation] = Field(default_factory=list)
     current_raw: str | None = Field(default=None, description="Ячейка как в документе")

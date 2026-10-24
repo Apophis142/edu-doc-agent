@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 
 _DASHES = str.maketrans({c: "-" for c in "‐‑‒–—−"})
+_BR_RE = re.compile(r"<br\s*/?>", re.I)
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
 _SEPARATOR_CELL_RE = re.compile(r"^:?-{3,}:?$")
 
@@ -16,18 +17,15 @@ class MdTable:
 
 
 def clean_text(text: str) -> str:
-    """Убирает md/html-разметку и нормализует пробелы и тире.
+    """Убирает `<br>`-разметку и нормализует пробелы и тире.
 
+    `<br>` (так парсер docx записывает перенос строки в ячейке) превращается в «\\n».
     Сами коды (в том числе нумерацию ПКП) не меняем — только символы-тире и пробелы.
     """
-    text = text.replace("<u>", "").replace("</u>", "").replace("**", "")
+    text = _BR_RE.sub("\n", text)
     text = text.replace(" ", " ").translate(_DASHES)
-    return re.sub(r"[ \t]+", " ", text).strip()
-
-
-def strip_emphasis(text: str) -> str:
-    """clean_text + снятие обрамляющих `*`/`_` (курсив у названий)."""
-    return clean_text(text).strip("*_ ")
+    text = re.sub(r"[ \t]+", " ", text)
+    return re.sub(r"\s*\n\s*", "\n", text).strip()
 
 
 def split_row(line: str) -> list[str]:

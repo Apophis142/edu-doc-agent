@@ -1,21 +1,31 @@
-"""Тесты извлечения из РПД: синтетическая фикстура и (если есть) реальные md из data/md."""
+"""Тесты извлечения из РПД: синтетическая фикстура и (если есть) реальные md из data/md_new."""
 
 import os
 import re
+import unicodedata
 from pathlib import Path
 
 import pytest
 
 from edu_doc_agent.extraction import RPDExtraction, extract_rpd, extract_rpd_file
 from edu_doc_agent.extraction.md_utils import clean_text, parse_tables
-from edu_doc_agent.extraction.patterns import COMPETENCE_RE, INDICATOR_RE, OUTCOME_RE
+from edu_doc_agent.extraction.models import LearningOutcome, SourceRef
+from edu_doc_agent.extraction.patterns import COMPETENCE_RE, INDICATOR_RE, OUTCOME_RE, code_key
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = REPO_ROOT / "tests" / "fixtures" / "rpd_synthetic.md"
 _DATA = Path(os.environ.get("DATA_DIR") or REPO_ROOT / "data")
-# md_all/rpd — все РПД корпуса; md — небольшой набор из пяти документов
-REAL_MD_DIR = _DATA / "md_all" / "rpd" if (_DATA / "md_all" / "rpd").exists() else _DATA / "md"
-REAL_RPD = sorted(REAL_MD_DIR.glob("*.md")) if REAL_MD_DIR.exists() else []
+# md_new — вывод парсера docx (ветка parser-service); в папке лежат и не-РПД (ОХОП, ЦКМВ),
+# поэтому берём только файлы с титулом «РАБОЧАЯ ПРОГРАММА»
+REAL_MD_DIR = _DATA / "md_new"
+
+
+def _is_rpd(path: Path) -> bool:
+    head = path.read_text(encoding="utf-8")[:1500]
+    return "".join(head.split()).upper().find("РАБОЧАЯПРОГРАММА") >= 0
+
+
+REAL_RPD = sorted(p for p in REAL_MD_DIR.glob("*.md") if _is_rpd(p)) if REAL_MD_DIR.exists() else []
 
 needs_real_data = pytest.mark.skipif(
     not REAL_RPD, reason=f"нет реальных md-файлов РПД в {REAL_MD_DIR}"
@@ -48,7 +58,7 @@ def test_indicator_and_outcome_codes() -> None:
 
 
 def test_clean_text_normalizes_markup_and_dashes() -> None:
-    assert clean_text("**ПКП–ППК—Р1**  <u>x</u>") == "ПКП-ППК-Р1 x"
+    assert clean_text("ПКП–ППК—Р1 \u00a0x") == "ПКП-ППК-Р1 x"
 
 
 def test_parse_tables_keeps_line_numbers_and_sections() -> None:
@@ -102,23 +112,23 @@ def test_synthetic_indicators(synthetic: RPDExtraction) -> None:
 
 def test_synthetic_outcomes_all_styles(synthetic: RPDExtraction) -> None:
     outs = synthetic.learning_outcomes
-    # префиксный код + маркеры `*`
+    # префиксный код + маркеры `•`
     first = [o for o in outs if o.indicator_code == "ПКП-ППК-ТС1.1"]
     assert [(o.kind, o.code) for o in first] == [
         ("знает", "ПКП-ППК-ТС1.1. З-1"),
         ("знает", "ПКП-ППК-ТС1.1. З-2"),
         ("умеет", "ПКП-ППК-ТС1.1. У-1"),
     ]
-    assert first[0].text == "Знает устройство синтетических систем."
+    assert first[0].text == "устройство синтетических систем."
     # суффиксный код в скобках, маркеры `•`
     second = [o for o in outs if o.indicator_code == "ПКП-ППК-ТС1.2"]
     assert [o.text for o in second] == ["основы тестирования", "виды проверок", "писать тесты"]
     # без кодов вообще: вид берётся из заголовка «знает:/умеет:/владеет:»
-    plain = [o for o in outs if o.competence_code == "ОПК-9"]
+    plain = [o for o in outs if o.competence_codes == ["ОПК-9"]]
     assert all(o.code is None for o in plain)
     assert [o.kind for o in plain] == ["знает", "умеет", "знает", "владеет"]
     # код без маркеров списка и опечатка «3-1»
-    third = [o for o in outs if o.competence_code == "ПКП-16-ППК-ТС2"]
+    third = [o for o in outs if o.competence_codes == ["ПКП-16-ППК-ТС2"]]
     assert [(o.kind, o.code) for o in third] == [
         ("знает", "ПКП-16-ППК-ТС2.1. 3-1"),
         ("умеет", "ПКП-16-ППК-ТС2.1. У-1"),
@@ -168,8 +178,8 @@ HEAD = (
 
 def _title_doc(title: str) -> str:
     return (
-        f"**Р А Б О Ч А Я П Р О Г Р А М М А**\n\n**учебной дисциплины**\n\n*{title}*\n\n*Eng*\n\n"
-        "**Язык(и) обучения**\n\nрусский\n"
+        f"### Р А Б О Ч А Я П Р О Г Р А М М А\n\n### учебной дисциплины\n\n{title}\n\nEng\n\n"
+        "### Язык(и) обучения\n\nрусский\n"
     )
 
 
@@ -180,7 +190,7 @@ def test_title_starting_with_word_yazyk_is_not_mistaken_for_language_line() -> N
 
 
 def test_outcomes_table_row_without_outcomes_column() -> None:
-    md = HEAD + "| ОПК-1 Способен применять знания | ОПК-1.2 Использует знания |\n"
+    md = HEAD + "| ОПК-1 Способен применять знания |  | ОПК-1.2 Использует знания |\n"
     r = extract_rpd(md, "x.md")
     assert [(c.code, c.name) for c in r.competences] == [("ОПК-1", "Способен применять знания")]
     assert [i.code for i in r.indicators] == ["ОПК-1.2"] and r.learning_outcomes == []
@@ -197,8 +207,8 @@ def test_outcomes_table_with_number_and_group_columns() -> None:
     r = extract_rpd(md, "x.md")
     assert r.competences[0].code == "ОПК-1" and r.competences[0].name == "Способен применять знания"
     assert [(o.kind, o.text) for o in r.learning_outcomes] == [
-        ("знает", "Знать основы"),
-        ("умеет", "Уметь считать"),
+        ("знает", "основы"),
+        ("умеет", "считать"),
     ]
 
 
@@ -206,7 +216,7 @@ def test_competence_name_before_code_and_kind_headings_without_colon() -> None:
     md = (
         HEAD
         + "| способен проектировать (ПКП-МО-1) "
-        + "| **знать**   * основы ML   **уметь**   * обучать модели "
+        + "| знать<br>• основы ML<br>уметь<br>• обучать модели "
         + "| ПКП-МО-1.1 Применяет |\n"
     )
     r = extract_rpd(md, "x.md")
@@ -218,7 +228,7 @@ def test_competence_name_before_code_and_kind_headings_without_colon() -> None:
 
 
 def test_indicators_sharing_one_text() -> None:
-    md = HEAD + "| ОПК-1. Способен | * Знает основы. | * ОПК-1.1; ОПК-1.2: применяет знания. |\n"
+    md = HEAD + "| ОПК-1. Способен | • Знает основы. | ОПК-1.1; ОПК-1.2: применяет знания. |\n"
     r = extract_rpd(md, "x.md")
     assert [(i.code, i.text) for i in r.indicators] == [
         ("ОПК-1.1", "применяет знания"),
@@ -249,7 +259,7 @@ def test_assessment_rows_continuation_multi_indicator_and_empty_kim() -> None:
     ]
 
 
-# --- реальные документы (пропускаются, если data/md нет) ---------------------------------------
+# --- реальные документы (пропускаются, если data/md_new нет)  ---
 
 
 @needs_real_data
@@ -258,13 +268,18 @@ def test_real_rpd_parser_invariants(path: Path) -> None:
     """Что должен найти парсер в любом РПД. Полнота оценочных средств и названий компетенций —
     свойство документа, а не парсера, поэтому здесь не проверяется."""
     r = extract_rpd_file(path)
-    assert r.doc_kind == "discipline" and r.title
+    assert r.doc_kind in ("discipline", "practice") and r.title
     assert r.registration_number and re.fullmatch(r"\d{5,6}", r.registration_number)
     assert r.credits and r.credits > 0
-    assert r.competences and r.indicators and r.learning_outcomes and r.control_forms
+    assert r.competences and r.indicators and r.learning_outcomes
+    if r.doc_kind == "discipline":
+        assert r.control_forms and r.assessments
     assert all(INDICATOR_RE.fullmatch(i.code) for i in r.indicators)
-    assert all(o.competence_code and o.kind for o in r.learning_outcomes)
+    assert all(o.competence_codes and o.kind for o in r.learning_outcomes)
     assert all(f.intermediate for f in r.control_forms)
+    # разметка парсера не должна просачиваться в значения
+    texts = [i.text for i in r.indicators] + [o.text for o in r.learning_outcomes]
+    assert not any("<br>" in t or "\n" in t for t in texts)
 
 
 @needs_real_data
@@ -276,24 +291,115 @@ def test_real_corpus_has_no_unclassified_outcomes() -> None:
 
 
 @needs_real_data
-def test_real_devops_exact_values() -> None:
-    path = next((p for p in REAL_RPD if "DevOps" in p.name or "devops" in p.name), None)
+def test_real_math_analysis_exact_values() -> None:
+    path = next(
+        (p for p in REAL_RPD if "Математический_анализ_I" in unicodedata.normalize("NFC", p.name)),
+        None,
+    )
     if path is None:
-        pytest.skip("нет DevOps в корпусе")
+        pytest.skip("нет «Математический анализ I» в md_new")
     r = extract_rpd_file(path)
-    assert (r.title, r.registration_number, r.credits) == ("DevOps", "082922", 4.0)
-    assert [c.code for c in r.competences] == [
-        "ПКП-ППК-ОС3",
-        "ПКП-ППК-ОС4",
-        "ПКП-ППК-ОС6",
-        "ПКП-ППК-Р5",
-        "ПКП-ППК-ДА6",
-    ]
-    assert len(r.indicators) == 12 and len(r.assessments) == 12
-    assert all(o.code for o in r.learning_outcomes)  # в этом шаблоне у каждого пункта есть код
+    assert (r.doc_kind, r.title, r.title_en) == (
+        "discipline",
+        "Математический анализ I",
+        "Mathematical Analysis I",
+    )
+    assert (r.registration_number, r.credits) == ("001856", 6.0)
+    assert [c.code for c in r.competences] == ["УК-1", "ПКП-УНК-03", "ПКА-1", "ОПК-1"]
+    assert len(r.indicators) == 7 and len(r.assessments) == 7
+    assert {i.code: i.level for i in r.indicators}["ПКП-УНК-03.01"] == "Базовый"
+    assert r.assessments[0].materials == ["Контрольные работы", "Вопросы к экзамену"]
     assert [(f.semester, [a.kind for a in f.intermediate]) for f in r.control_forms] == [
-        (5, ["экзамен"])
+        (1, ["зачёт", "экзамен"])
     ]
+    uk1 = [o for o in r.learning_outcomes if o.competence_codes == ["УК-1"]]
+    assert [(o.kind, o.text) for o in uk1[:2]] == [
+        ("умеет", "аргументировано, логически верно строить устную речь"),
+        (
+            "умеет",
+            "использовать математический язык и символику при построении математических моделей",
+        ),
+    ]
+
+
+@needs_real_data
+def test_real_practice_exact_values() -> None:
+    path = next((p for p in REAL_RPD if "практика" in unicodedata.normalize("NFC", p.name)), None)
+    if path is None:
+        pytest.skip("нет РПП в md_new")
+    r = extract_rpd_file(path)
+    assert (r.doc_kind, r.registration_number, r.credits) == ("practice", "064682", 18.0)
+    assert r.title == "Учебная практика (проектно-технологическая)"
+    first = next(o for o in r.learning_outcomes if o.code == "ПКП-ППК-Р1.1. 3-1")
+    assert first.kind == "знает" and first.indicator_code == "ПКП-ППК-Р1.1"
+    assert first.text == "алгоритмы решения типовых задач, области и способы их применения"
+
+
+# --- формат md_new: заголовки «###» в титуле, переносы строк в ячейках как <br> ------------------
+
+_NEW_FORMAT = """### Санкт-Петербургский государственный университет
+
+### Р А Б О Ч А Я П Р О Г Р А М М А
+
+### учебной дисциплины
+
+Тестовая дисциплина
+
+Test Discipline
+
+### Язык(и) обучения
+
+русский
+
+Трудоёмкость (границы трудоёмкости) в зачетных единицах: 3
+
+Регистрационный номер рабочей программы: 000001
+
+## 1.3. Перечень результатов обучения (learning outcomes)
+
+| Код и наименование компетенции | Планируемые результаты обучения | Код индикатора и индикатор |
+| --- | --- | --- |
+|УК-1 а<br>б|знает:<br>ааа;<br>умеет:<br>ббб;<br>владеет:<br>ввв.|УК-1.1 Т1<br>УК-1.2 Т2 (Базовый)|
+
+### 3.1.4. Методические материалы
+
+| № | Код индикатора и индикатор | Контрольно-измерительные материалы |
+| --- | --- | --- |
+| 1 | УК-1.1 Анализирует задачу | Контрольные работы<br>Вопросы к экзамену |
+
+| Период | Формы текущего контроля успеваемости | Виды промежуточной аттестации |
+| --- | --- | --- |
+| Семестр 2 | Контрольные работы<br>Коллоквиум | зачет, экзамен |
+"""
+
+
+def test_new_format_title_and_cells() -> None:
+    r = extract_rpd(_NEW_FORMAT, file="new.md")
+    assert (r.doc_kind, r.title, r.title_en) == (
+        "discipline",
+        "Тестовая дисциплина",
+        "Test Discipline",
+    )
+    assert (r.registration_number, r.credits) == ("000001", 3.0)
+    assert [(c.code, c.name) for c in r.competences] == [("УК-1", "а б")]
+    assert [(i.code, i.text, i.level) for i in r.indicators] == [
+        ("УК-1.1", "Т1", None),
+        ("УК-1.2", "Т2", "Базовый"),
+    ]
+    assert [(o.kind, o.text) for o in r.learning_outcomes] == [
+        ("знает", "ааа"),
+        ("умеет", "ббб"),
+        ("владеет", "ввв."),
+    ]
+    assert r.assessments[0].materials == ["Контрольные работы", "Вопросы к экзамену"]
+    (form,) = r.control_forms
+    assert form.semester == 2 and form.current == ["Контрольные работы", "Коллоквиум"]
+    assert [a.kind for a in form.intermediate] == ["зачёт", "экзамен"]
+    assert r.warnings == []
+
+
+def test_clean_text_turns_br_into_newline() -> None:
+    assert clean_text("a<br>b <br/> c") == "a\nb\nc"
 
 
 @pytest.mark.parametrize(
@@ -325,3 +431,414 @@ def test_split_items_ignores_commas_in_parentheses_and_drops_repeats() -> None:
 
     assert _split_items("а (б, в), г; г") == ["а (б, в)", "г"]
     assert _split_items(None) == []
+
+
+# --- регрессии корпуса docx -> md (75 документов) ------------------------------------------------
+
+
+def test_kind_headings_without_colon_on_own_line() -> None:
+    """«Знать<br>…<br>Уметь<br>…» — вид задан словом в отдельной строке, без двоеточия."""
+    md = (
+        HEAD
+        + "| ОПК-1 Способен | Знать<br>основы<br>принципы; методы<br>Уметь<br>считать "
+        + "| ОПК-1.1 Применяет |\n"
+    )
+    r = extract_rpd(md, "x.md")
+    assert [(o.kind, o.text) for o in r.learning_outcomes] == [
+        ("знает", "основы"),
+        ("знает", "принципы; методы"),
+        ("умеет", "считать"),
+    ]
+
+
+def test_kind_word_inside_sentence_is_not_a_heading() -> None:
+    md = HEAD + "| ОПК-1 Способен | знает:<br>как студент умеет учиться | ОПК-1.1 Применяет |\n"
+    r = extract_rpd(md, "x.md")
+    assert [(o.kind, o.text) for o in r.learning_outcomes] == [
+        ("знает", "как студент умеет учиться")
+    ]
+
+
+def test_table_header_with_br_inside_phrases() -> None:
+    """Заголовок «Планируемые<br>результаты<br>обучения» и столбец «№» не мешают найти таблицу."""
+    md = (
+        "| № | Код и<br>наименование<br>компетенции | Планируемые<br>результаты<br>обучения "
+        "| Код индикатора |\n| --- | --- | --- | --- |\n"
+        "|  | 2 | 3 | 4 |\n"
+        "| 1 | УК-1 Способен | знать<br>основы | УК-1.1 Применяет |\n"
+    )
+    r = extract_rpd(md, "x.md")
+    assert [c.code for c in r.competences] == ["УК-1"]
+    assert [(o.kind, o.text) for o in r.learning_outcomes] == [("знает", "основы")]
+    assert [i.code for i in r.indicators] == ["УК-1.1"]
+    assert not any("1.3" in w for w in r.warnings)
+
+
+def test_vertically_merged_outcomes_cell_is_taken_once() -> None:
+    """Парсер повторяет объединённую по вертикали ячейку в каждой строке: результаты берём один
+    раз, а компетенции всех строк группы собираем в `competence_codes`."""
+    same = "знает:<br>основы<br>умеет:<br>считать"
+    md = (
+        HEAD
+        + f"| УКБ-3 Способен | {same} | УКБ-3.1 Один |\n"
+        + f"| ОПК-1 Способен | {same} | ОПК-1.2 Два |\n"
+        + f"| ОПК-2 Способен | {same} | ОПК-2.2 Три |\n"
+        + "| ПКП-ППК-ОС2 Способен | знает:<br>другое | ПКП-ППК-ОС2.1 Четыре |\n"
+    )
+    r = extract_rpd(md, "x.md")
+    assert [c.code for c in r.competences] == ["УКБ-3", "ОПК-1", "ОПК-2", "ПКП-ППК-ОС2"]
+    assert [(o.competence_codes, o.text) for o in r.learning_outcomes] == [
+        (["УКБ-3", "ОПК-1", "ОПК-2"], "основы"),
+        (["УКБ-3", "ОПК-1", "ОПК-2"], "считать"),
+        (["ПКП-ППК-ОС2"], "другое"),
+    ]
+    assert [i.code for i in r.indicators] == ["УКБ-3.1", "ОПК-1.2", "ОПК-2.2", "ПКП-ППК-ОС2.1"]
+
+
+# --- траектории и формы обучения в таблице форм контроля -----------------------------------------
+
+_FORMS_HEAD = (
+    "| Период обучения (модуль) | Формы текущего контроля успеваемости "
+    "| Виды промежуточной аттестации |\n| --- | --- | --- |\n"
+)
+
+
+def test_control_forms_keep_trajectory_and_study_form() -> None:
+    md = (
+        _FORMS_HEAD
+        + "| ОСНОВНАЯ ТРАЕКТОРИЯ<br>Профиль ТОП-ИТ ПРО |  |  |\n"
+        + "| очная форма обучения |  |  |\n"
+        + "| Семестр 3 |  | экзамен |\n"
+        + "| ТРАЕКТОРИЯ «Профиль Стандарт» |  |  |\n"
+        + "| Форма обучения: очная |  |  |\n"
+        + "| Семестр 4 | тесты | зачёт |\n"
+    )
+    a, b = extract_rpd(md, "x.md").control_forms
+    assert (a.trajectory, a.study_form, a.semester) == (
+        "ОСНОВНАЯ ТРАЕКТОРИЯ Профиль ТОП-ИТ ПРО",
+        "очная",
+        3,
+    )
+    assert (b.trajectory, b.study_form, b.semester) == ("ТРАЕКТОРИЯ «Профиль Стандарт»", "очная", 4)
+
+
+def test_same_semester_in_different_trajectories_is_not_collapsed() -> None:
+    md = (
+        _FORMS_HEAD
+        + "| ТРАЕКТОРИЯ «Профиль ТОП» |  |  |\n| очная форма обучения |  |  |\n"
+        + "| Семестр 3 |  | экзамен |\n"
+        + "| ТРАЕКТОРИЯ «Профиль Стандарт» |  |  |\n| очная форма обучения |  |  |\n"
+        + "| Семестр 3 |  | экзамен |\n"
+    )
+    forms = extract_rpd(md, "x.md").control_forms
+    assert [(f.trajectory, f.semester) for f in forms] == [
+        ("ТРАЕКТОРИЯ «Профиль ТОП»", 3),
+        ("ТРАЕКТОРИЯ «Профиль Стандарт»", 3),
+    ]
+
+
+def test_identical_rows_within_one_trajectory_are_still_deduplicated() -> None:
+    md = (
+        _FORMS_HEAD
+        + "| ОСНОВНАЯ ТРАЕКТОРИЯ |  |  |\n| очная форма обучения |  |  |\n"
+        + "| Семестр 1 |  | экзамен |\n| Семестр 1 |  | экзамен |\n"
+    )
+    assert len(extract_rpd(md, "x.md").control_forms) == 1
+
+
+def test_study_forms_are_told_apart() -> None:
+    md = (
+        _FORMS_HEAD
+        + "| ОСНОВНАЯ ТРАЕКТОРИЯ |  |  |\n"
+        + "| очная форма обучения |  |  |\n| Семестр 1 |  | экзамен |\n"
+        + "| заочная форма обучения |  |  |\n| Семестр 1 |  | экзамен |\n"
+    )
+    forms = extract_rpd(md, "x.md").control_forms
+    assert [f.study_form for f in forms] == ["очная", "заочная"]
+
+
+# --- практика без таблиц форм контроля и КИМ ------------------------------------------------------
+
+
+def test_practice_without_control_tables_gives_warnings_not_garbage() -> None:
+    md = (
+        "### Р А Б О Ч А Я П Р О Г Р А М М А\n\n### П Р А К Т И К И\n\nТестовая практика\n\n"
+        "Test Practice\n\n### Язык(и) обучения\n\nрусский\n\n"
+        "Трудоемкость в зачетных единицах: 6\n\nРегистрационный номер рабочей программы: 000777\n\n"
+        "### 3.1.1. Виды и формы текущего контроля\n\n- Семестр 2: 3 з.е. (108 часов)\n"
+    )
+    r = extract_rpd(md, "practice.md")
+    assert (r.doc_kind, r.title, r.credits) == ("practice", "Тестовая практика", 6.0)
+    assert r.control_forms == [] and r.assessments == []
+    assert any("формы контроля" in w for w in r.warnings)
+    assert any("оценочных средств" in w for w in r.warnings)
+
+
+@needs_real_data
+def test_real_practice_has_outcomes_but_no_control_forms() -> None:
+    path = next((p for p in REAL_RPD if "практика" in unicodedata.normalize("NFC", p.name)), None)
+    if path is None:
+        pytest.skip("нет РПП в md_new")
+    r = extract_rpd_file(path)
+    assert r.doc_kind == "practice" and r.learning_outcomes
+    assert r.control_forms == []
+    assert any("формы контроля" in w for w in r.warnings)
+
+
+# --- контракт: схема результата ------------------------------------------------------------------
+
+
+def test_result_roundtrips_through_json(synthetic: RPDExtraction) -> None:
+    again = RPDExtraction.model_validate_json(synthetic.model_dump_json())
+    assert again == synthetic
+
+
+def test_result_schema_fields_are_stable() -> None:
+    """Потребители читают эти поля; изменение схемы должно быть осознанным."""
+    schema = RPDExtraction.model_json_schema()
+    assert set(schema["properties"]) == {
+        "file",
+        "doc_kind",
+        "title",
+        "title_en",
+        "registration_number",
+        "credits",
+        "competences",
+        "indicators",
+        "learning_outcomes",
+        "assessments",
+        "control_forms",
+        "warnings",
+    }
+    assert set(schema["$defs"]["ControlForm"]["properties"]) == {
+        "semester",
+        "trajectory",
+        "study_form",
+        "current",
+        "intermediate",
+        "current_raw",
+        "intermediate_raw",
+        "source",
+    }
+    outcome_fields = set(schema["$defs"]["LearningOutcome"]["properties"])
+    assert "competence_codes" in outcome_fields and "competence_code" not in outcome_fields
+    assert schema["additionalProperties"] is False
+
+
+def test_unknown_field_is_rejected() -> None:
+    with pytest.raises(ValueError):
+        RPDExtraction.model_validate({"file": "x.md", "surprise": 1})
+
+
+def test_merged_outcomes_group_without_indicators_and_repeated_competence() -> None:
+    """Повторная строка группы без индикатора тоже добавляет компетенцию; повторов кода нет."""
+    same = "знает:<br>основы"
+    md = (
+        HEAD
+        + f"| УК-1 Способен | {same} | УК-1.1 Один |\n"
+        + f"| УК-2 Способен | {same} |  |\n"
+        + f"|  | {same} |  |\n"
+        + "| УК-3 Способен | умеет:<br>считать | УК-3.1 Три |\n"
+    )
+    r = extract_rpd(md, "x.md")
+    assert [c.code for c in r.competences] == ["УК-1", "УК-2", "УК-3"]
+    assert [(o.competence_codes, o.text) for o in r.learning_outcomes] == [
+        (["УК-1", "УК-2"], "основы"),
+        (["УК-3"], "считать"),
+    ]
+
+
+def test_same_text_in_non_adjacent_rows_is_not_a_merge() -> None:
+    md = (
+        HEAD
+        + "| УК-1 Способен | знает:<br>основы | УК-1.1 Один |\n"
+        + "| УК-2 Способен | знает:<br>другое | УК-2.1 Два |\n"
+        + "| УК-3 Способен | знает:<br>основы | УК-3.1 Три |\n"
+    )
+    r = extract_rpd(md, "x.md")
+    assert [(o.competence_codes, o.text) for o in r.learning_outcomes] == [
+        (["УК-1"], "основы"),
+        (["УК-2"], "другое"),
+        (["УК-3"], "основы"),
+    ]
+
+
+# --- обратная совместимость: старое поле competence_code ------------------------------------------
+
+
+def _outcome(**kw) -> LearningOutcome:
+    return LearningOutcome(text="основы", source=SourceRef(file="x.md"), **kw)
+
+
+def test_competence_code_is_first_of_competence_codes() -> None:
+    assert _outcome(competence_codes=["УКБ-3", "ОПК-1"]).competence_code == "УКБ-3"
+    assert _outcome().competence_code is None
+
+
+def test_competence_code_is_kept_in_json_output() -> None:
+    dumped = _outcome(competence_codes=["УК-1", "УК-2"]).model_dump()
+    assert dumped["competence_code"] == "УК-1" and dumped["competence_codes"] == ["УК-1", "УК-2"]
+
+
+def test_legacy_competence_code_input_is_accepted() -> None:
+    assert _outcome(competence_code="УК-1").competence_codes == ["УК-1"]
+    assert _outcome(competence_code=None).competence_codes == []
+    # если пришли оба поля, список главнее
+    both = _outcome(competence_code="УК-1", competence_codes=["ОПК-1", "ОПК-2"])
+    assert both.competence_codes == ["ОПК-1", "ОПК-2"]
+
+
+def test_legacy_json_without_competence_codes_is_readable() -> None:
+    legacy = (
+        '{"file": "x.md", "learning_outcomes": [{"kind": "знает", "text": "основы", '
+        '"competence_code": "УК-1", "source": {"file": "x.md"}}]}'
+    )
+    (o,) = RPDExtraction.model_validate_json(legacy).learning_outcomes
+    assert o.competence_codes == ["УК-1"] and o.competence_code == "УК-1"
+
+
+# --- регрессии аудита регулярок (корпус из 75 документов) ------------------------------
+
+
+def test_indicator_in_format_text_then_code_in_brackets() -> None:
+    md = (
+        HEAD
+        + "| способен проектировать (ПКП-МО-1) | ПКП-МО-1.2. З-1. Знает основы. "
+        + "| применяет сети (ПКП-МО-1.2)<br>обучает модели (Средний) (ПКП-МО-1.3) |\n"
+    )
+    r = extract_rpd(md, "x.md")
+    assert [(i.code, i.text, i.level) for i in r.indicators] == [
+        ("ПКП-МО-1.2", "применяет сети", None),
+        ("ПКП-МО-1.3", "обучает модели", "Средний"),
+    ]
+    assert [i.competence_code for i in r.indicators] == ["ПКП-МО-1", "ПКП-МО-1"]
+
+
+def test_prefix_indicator_with_code_in_brackets_is_not_read_as_suffix_format() -> None:
+    md = HEAD + "| ОПК-1 Способен | знает:<br>основы | ОПК-1.1 Применяет методы (ОПК-1.2) |\n"
+    first = extract_rpd(md, "x.md").indicators[0]
+    assert (first.code, first.text) == ("ОПК-1.1", "Применяет методы (")  # а не наоборот
+
+
+def test_code_key_ignores_leading_zeros() -> None:
+    assert code_key("ПКП-УНК-03.01") == code_key("ПКП-УНК-3.1") == "ПКП-УНК-3.1"
+    assert code_key("ПКП-УНК-03") == code_key("ПКП-УНК-3")
+    assert code_key("ПКП-ППК-ОС3") == "ПКП-ППК-ОС3"
+    assert code_key("ОПК-10.10") == "ОПК-10.10"  # нули внутри числа не трогаем
+    assert code_key("ПКП-ППК-ОС3") != code_key("ПКП-16-ППК-ОС3")
+
+
+def test_assessment_row_with_competence_code_instead_of_indicator() -> None:
+    md = (
+        HEAD
+        + "| ПКП-УНК-3. Способен планировать | знает:<br>основы | ПКП-УНК-03.02. Планирует |\n\n"
+        + ASSESS_HEAD
+        + "| 1 | ПКП-УНК-03 Способен планировать | Отчёт; экзамен |\n"
+        + "| 2 | ПКП-УНК-3 | План |\n"
+        + "| 3 | ПКП-УНК-03.02 Планирует | Тест |\n"
+    )
+    r = extract_rpd(md, "x.md")
+    got = [(a.indicator_code, a.competence_code, a.materials) for a in r.assessments]
+    assert got == [
+        (None, "ПКП-УНК-3", ["Отчёт", "экзамен"]),  # «03» и «3» — одна компетенция из 1.3
+        (None, "ПКП-УНК-3", ["План"]),
+        ("ПКП-УНК-03.02", None, ["Тест"]),
+    ]
+
+
+def test_trailing_comma_and_broken_bracket_before_code_are_cleaned() -> None:
+    md = (
+        HEAD
+        + "| ОПК-1 Способен | знает:<br>основы,<br>методы<br>умеет:<br>"
+        + "методы и приёмы отладки (, ОПК-1.1. У-1) | ОПК-1.1 Применяет |\n"
+    )
+    r = extract_rpd(md, "x.md")
+    assert [(o.kind, o.code, o.text) for o in r.learning_outcomes] == [
+        ("знает", None, "основы"),
+        ("знает", None, "методы"),
+        ("умеет", "ОПК-1.1. У-1", "методы и приёмы отладки"),
+    ]
+
+
+def test_competence_without_name_gives_warning() -> None:
+    md = HEAD + "| ПКП-УНК-03 | умеет:<br>считать | ПКП-УНК-03.01 Демонстрирует |\n"
+    r = extract_rpd(md, "x.md")
+    assert r.competences[0].name is None
+    assert any("ПКП-УНК-03" in w and "название" in w for w in r.warnings)
+
+
+def test_kind_verb_is_dropped_from_text_only_when_it_matches_kind() -> None:
+    md = (
+        HEAD
+        + "| ОПК-1 Способен | ОПК-1.1. З-1. Знает основы.<br>ОПК-1.1. У-1. Умеет считать.<br>"
+        + "ОПК-1.1. В-1. Знает как владеть. | ОПК-1.1 Применяет |\n"
+    )
+    r = extract_rpd(md, "x.md")
+    assert [(o.kind, o.text) for o in r.learning_outcomes] == [
+        ("знает", "основы."),
+        ("умеет", "считать."),
+        ("владеет", "Знает как владеть."),  # глагол другого вида не трогаем
+    ]
+
+
+def test_verb_is_kept_when_nothing_meaningful_remains() -> None:
+    md = HEAD + "| ОПК-1 Способен | ОПК-1.1. З-1. Знает да | ОПК-1.1 Применяет |\n"
+    (o,) = extract_rpd(md, "x.md").learning_outcomes
+    assert (o.kind, o.text) == ("знает", "Знает да")
+
+
+def test_wrapped_item_after_comma_is_joined_when_line_endings_differ() -> None:
+    md = (
+        HEAD
+        + "| УК-1 Способен | владеет:<br>методами формализации задач,<br>анализа данных;<br>"
+        + "методологией моделирования. | УК-1.1 Применяет |\n"
+    )
+    r = extract_rpd(md, "x.md")
+    assert [o.text for o in r.learning_outcomes] == [
+        "методами формализации задач, анализа данных",
+        "методологией моделирования.",
+    ]
+
+
+def test_comma_separated_lines_stay_separate_when_all_end_with_comma() -> None:
+    md = (
+        HEAD
+        + "| УК-1 Способен | умеет:<br>пользоваться средствами мониторинга,<br>"
+        + "настраивать протоколы,<br>строить сети. | УК-1.1 Применяет |\n"
+    )
+    r = extract_rpd(md, "x.md")
+    assert [o.text for o in r.learning_outcomes] == [
+        "пользоваться средствами мониторинга",
+        "настраивать протоколы",
+        "строить сети.",
+    ]
+
+
+def test_isolated_comma_line_is_joined_but_comma_run_is_a_list() -> None:
+    """Реальный случай «Компьютерные сети»: две строки с запятой подряд, затем строки с «;»."""
+    md = (
+        HEAD
+        + "| УК-1 Способен | умеет:<br>пользоваться средствами,<br>настраивать протоколы,<br>"
+        + "анализировать работу сетей;<br>проектировать сети. | УК-1.1 Применяет |\n"
+    )
+    r = extract_rpd(md, "x.md")
+    assert [o.text for o in r.learning_outcomes] == [
+        "пользоваться средствами",
+        "настраивать протоколы",
+        "анализировать работу сетей",
+        "проектировать сети.",
+    ]
+
+
+def test_one_item_with_several_codes_in_brackets_gives_record_per_code() -> None:
+    md = (
+        HEAD
+        + "| ОПК-1 Способен | знает:<br>методы отладки (ОПК-1.1. З-1, ОПК-1.2. З-2)<br>"
+        + "основы (ОПК-1.1. З-3) | ОПК-1.1 Один<br>ОПК-1.2 Два |\n"
+    )
+    r = extract_rpd(md, "x.md")
+    assert [(o.code, o.indicator_code, o.text) for o in r.learning_outcomes] == [
+        ("ОПК-1.1. З-1", "ОПК-1.1", "методы отладки"),
+        ("ОПК-1.2. З-2", "ОПК-1.2", "методы отладки"),
+        ("ОПК-1.1. З-3", "ОПК-1.1", "основы"),
+    ]
