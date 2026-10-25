@@ -14,7 +14,6 @@ from edu_doc_agent.parsing import (
     UnsupportedFormatError,
     parse_document,
 )
-from edu_doc_agent.parsing.__main__ import main
 
 # формула Word 'x+1=0' и 'элемент управления содержимым'
 _FORMULA = (
@@ -159,8 +158,11 @@ def test_unsupported_format(tmp_path: Path) -> None:
         parse_document(tmp_path / "scan.pdf")
 
 
-def test_script_writes_markdown(rpd: Path, tmp_path: Path) -> None:
-    main([str(rpd)])  # рядом с файлом
-    assert (tmp_path / "rpd.md").read_text(encoding="utf-8").startswith("# Раздел 1.")
-    main([str(tmp_path), "-o", str(tmp_path / "out")])  # вся папка
-    assert (tmp_path / "out" / "rpd.md").exists()
+def test_documents_to_markdown_files(rpd: Path, characteristic: Path, tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    out.mkdir()
+    for path in sorted(tmp_path.glob("*.docx")):
+        markdown = parse_document(path).to_markdown()
+        (out / f"{path.stem}.md").write_text(markdown, encoding="utf-8")
+    assert sorted(p.name for p in out.iterdir()) == ["characteristic.md", "rpd.md"]
+    assert (out / "rpd.md").read_text(encoding="utf-8").startswith("# Раздел 1.")
