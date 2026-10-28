@@ -165,7 +165,7 @@ def test_source_points_to_real_line(synthetic: RPDExtraction) -> None:
 
 def test_missing_tables_give_warnings() -> None:
     result = extract_rpd("# Пусто\n\nтекст", file="x.md")
-    assert len(result.warnings) == 3 and not result.competences
+    assert len(result.warnings) == 4 and not result.competences
 
 
 # --- регрессии: случаи, найденные на реальном корпусе ---------------------------------------
@@ -360,6 +360,12 @@ Test Discipline
 | Код и наименование компетенции | Планируемые результаты обучения | Код индикатора и индикатор |
 | --- | --- | --- |
 |УК-1 а<br>б|знает:<br>ааа;<br>умеет:<br>ббб;<br>владеет:<br>ввв.|УК-1.1 Т1<br>УК-1.2 Т2 (Базовый)|
+
+### 2.1. Организация
+
+| Период | лекции | практические занятия | Трудоёмкость |
+| --- | --- | --- | --- |
+| Семестр 2 | 48 | 60 | 3 |
 
 ### 3.1.4. Методические материалы
 
@@ -608,6 +614,24 @@ def test_result_schema_fields_are_stable() -> None:
         "learning_outcomes",
         "assessments",
         "control_forms",
+        "prerequisites",
+        "control_mentions",
+        "workload",
+        "workload_table",
+        "semesters",
+        "discipline_code",
+        "language",
+        "goals",
+        "active_forms",
+        "topic_hours",
+        "grade_scales",
+        "tickets",
+        "control_materials",
+        "developers",
+        "program",
+        "practice",
+        "prof_standards",
+        "standard_links",
         "warnings",
     }
     assert set(schema["$defs"]["ControlForm"]["properties"]) == {

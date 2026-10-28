@@ -9,6 +9,17 @@ _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
 _SEPARATOR_CELL_RE = re.compile(r"^:?-{3,}:?$")
 
 
+_SECTION_NUMBER_RE = re.compile(r"^(\d+(?:\.\d+)*)\.?(?:\s|$)")
+
+
+@dataclass
+class MdSection:
+    number: str | None  # «3.1.3» из заголовка «3.1.3. Методика…»; None, если номера нет
+    heading: str
+    text: str  # тело раздела без таблиц; номера строк совпадают с исходным файлом
+    line: int  # 1-based номер строки заголовка
+
+
 @dataclass
 class MdTable:
     rows: list[list[str]]
@@ -69,3 +80,38 @@ def parse_tables(text: str) -> list[MdTable]:
             section = clean_text(m.group(2))
     flush()
     return tables
+
+
+def split_sections(text: str) -> list[MdSection]:
+    """Делит md на разделы по заголовкам; строки таблиц в теле заменяются пустыми.
+
+    Пустые строки сохраняют нумерацию: смещение в `MdSection.text` легко перевести
+    в номер строки исходного файла (`line + text.count("\\n", 0, offset) + 1`).
+    """
+    sections: list[MdSection] = []
+    current: tuple[str, int] | None = None
+    body: list[str] = []
+
+    def flush() -> None:
+        if current is None:
+            return
+        heading, line = current
+        m = _SECTION_NUMBER_RE.match(heading)
+        sections.append(
+            MdSection(
+                number=m.group(1) if m else None,
+                heading=heading,
+                text="\n".join(body),
+                line=line,
+            )
+        )
+
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        m = _HEADING_RE.match(line)
+        if m:
+            flush()
+            current, body = (clean_text(m.group(2)), lineno), []
+        elif current is not None:
+            body.append("" if line.lstrip().startswith("|") else clean_text(line))
+    flush()
+    return sections

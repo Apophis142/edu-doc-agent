@@ -7,7 +7,10 @@
 - титул: название, рег. номер, трудоёмкость, тип документа;
 - таблица 1.3: компетенции, индикаторы, результаты обучения;
 - таблица 3.1.4: индикатор → контрольно-измерительные материалы (оценочные средства);
-- таблица форм контроля: текущий контроль и промежуточная аттестация по семестрам.
+- таблица форм контроля: текущий контроль и промежуточная аттестация по семестрам;
+- цели, активные формы, часы по темам, шкалы и билеты, КИМ, разработчики, направление и ООП,
+  данные РПП (вид, профстандарты, компетенции по группам) — см. `sections.py`;
+- свободный текст (пререквизиты, формы контроля, трудоёмкость, семестры) — см. `freetext.py`.
 
 Всё, что не удалось разобрать правилами, не выдумываем, а пропускаем и пишем в `warnings`
 (кандидаты на LLM-извлечение).
@@ -16,6 +19,7 @@
 import re
 from pathlib import Path
 
+from edu_doc_agent.extraction.freetext import extract_free_text
 from edu_doc_agent.extraction.md_utils import MdTable, clean_text, parse_tables
 from edu_doc_agent.extraction.models import (
     AssessmentLink,
@@ -53,6 +57,8 @@ from edu_doc_agent.extraction.patterns import (
     TRAJECTORY_ROW_RE,
     code_key,
 )
+from edu_doc_agent.extraction.sections import extract_sections
+from edu_doc_agent.extraction.workload_table import check_workload, extract_workload_table
 
 _TITLE_SCAN_LINES = 40
 _HEADING_MARK_RE = re.compile(r"^#+\s*")
@@ -77,6 +83,10 @@ def extract_rpd(text: str, file: str) -> RPDExtraction:
         _extract_assessment_table(table, file, result)
     for table in tables:
         _extract_control_forms(table, file, result)
+        extract_workload_table(table, file, result)
+    check_workload(result)
+    extract_free_text(text, file, result)
+    extract_sections(text, tables, file, result)
 
     for comp in result.competences:
         if not comp.name:
@@ -87,6 +97,8 @@ def extract_rpd(text: str, file: str) -> RPDExtraction:
         result.warnings.append("не найдена таблица оценочных средств (3.1.4)")
     if not result.control_forms:
         result.warnings.append("не найдены формы контроля по семестрам")
+    if not result.workload_table:
+        result.warnings.append("не найдена таблица трудоёмкости по видам занятий")
     return result
 
 
