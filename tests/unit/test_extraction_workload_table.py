@@ -1,15 +1,9 @@
 """Тесты разбора таблицы «Трудоёмкость, объёмы учебной работы»."""
 
-import os
-import unicodedata
-from pathlib import Path
-
 import pytest
 
 from edu_doc_agent.extraction import RPDExtraction, extract_rpd, extract_rpd_file
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-REAL_MD_DIR = Path(os.environ.get("DATA_DIR") or REPO_ROOT / "data") / "md_new"
+from tests.real_data import find_md
 
 
 def _row(*cells: str, width: int = 12) -> str:
@@ -176,18 +170,9 @@ def test_missing_table_gives_warning() -> None:
     )
 
 
-def _real(fragment: str) -> Path | None:
-    if not REAL_MD_DIR.exists():
-        return None
-    return next(
-        (p for p in REAL_MD_DIR.glob("*.md") if fragment in unicodedata.normalize("NFC", p.name)),
-        None,
-    )
-
-
-@pytest.mark.skipif(_real("Математический_анализ_I.md") is None, reason="нет md мат. анализа")
+@pytest.mark.skipif(find_md("Математический анализ I") is None, reason="нет md мат. анализа")
 def test_real_math_analysis_workload() -> None:
-    path = _real("Математический_анализ_I.md")
+    path = find_md("Математический анализ I")
     assert path is not None
     result = extract_rpd_file(path)
     sem, total = result.workload_table

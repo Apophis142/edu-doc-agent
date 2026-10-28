@@ -1,29 +1,12 @@
 """Тесты извлечения из свободного текста (Yargy): пререквизиты, контроль, трудоёмкость, семестры."""
 
-import os
-import unicodedata
-from pathlib import Path
-
 import pytest
 
 from edu_doc_agent.extraction import RPDExtraction, extract_rpd, extract_rpd_file
+from tests.real_data import find_md
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-REAL_MD_DIR = Path(os.environ.get("DATA_DIR") or REPO_ROOT / "data") / "md_new"
-
-
-def _real(fragment: str) -> Path | None:
-    """Файл из md_new по подстроке имени (на macOS имена в NFD, поэтому нормализуем)."""
-    if not REAL_MD_DIR.exists():
-        return None
-    return next(
-        (p for p in REAL_MD_DIR.glob("*.md") if fragment in unicodedata.normalize("NFC", p.name)),
-        None,
-    )
-
-
-MATH = _real("Математический_анализ_I.md")
-PRACTICE = _real("Учебная_практика")
+MATH = find_md("Математический анализ I")
+PRACTICE = find_md("С2-5_ТОП__Учебная практика")
 
 
 def _extract(*sections: tuple[str, str], title: str = "Тестовая дисциплина") -> RPDExtraction:

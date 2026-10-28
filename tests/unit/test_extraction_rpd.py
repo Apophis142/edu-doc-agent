@@ -1,8 +1,6 @@
-"""Тесты извлечения из РПД: синтетическая фикстура и (если есть) реальные md из data/md_new."""
+"""Тесты извлечения из РПД: синтетическая фикстура и реальные РПД из data/ (docx → md парсером)."""
 
-import os
 import re
-import unicodedata
 from pathlib import Path
 
 import pytest
@@ -11,13 +9,10 @@ from edu_doc_agent.extraction import RPDExtraction, extract_rpd, extract_rpd_fil
 from edu_doc_agent.extraction.md_utils import clean_text, parse_tables
 from edu_doc_agent.extraction.models import LearningOutcome, SourceRef
 from edu_doc_agent.extraction.patterns import COMPETENCE_RE, INDICATOR_RE, OUTCOME_RE, code_key
+from tests.real_data import REAL_MD, find_md
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = REPO_ROOT / "tests" / "fixtures" / "rpd_synthetic.md"
-_DATA = Path(os.environ.get("DATA_DIR") or REPO_ROOT / "data")
-# md_new — вывод парсера docx (ветка parser-service); в папке лежат и не-РПД (ОХОП, ЦКМВ),
-# поэтому берём только файлы с титулом «РАБОЧАЯ ПРОГРАММА»
-REAL_MD_DIR = _DATA / "md_new"
 
 
 def _is_rpd(path: Path) -> bool:
@@ -25,11 +20,9 @@ def _is_rpd(path: Path) -> bool:
     return "".join(head.split()).upper().find("РАБОЧАЯПРОГРАММА") >= 0
 
 
-REAL_RPD = sorted(p for p in REAL_MD_DIR.glob("*.md") if _is_rpd(p)) if REAL_MD_DIR.exists() else []
+REAL_RPD = [p for p in REAL_MD if _is_rpd(p)]
 
-needs_real_data = pytest.mark.skipif(
-    not REAL_RPD, reason=f"нет реальных md-файлов РПД в {REAL_MD_DIR}"
-)
+needs_real_data = pytest.mark.skipif(not REAL_RPD, reason="нет реальных docx РПД в data/")
 
 
 # --- коды ----------------------------------------------------------------------------------
@@ -259,7 +252,7 @@ def test_assessment_rows_continuation_multi_indicator_and_empty_kim() -> None:
     ]
 
 
-# --- реальные документы (пропускаются, если data/md_new нет)  ---
+# --- реальные документы (пропускаются, если в data/ нет docx)  ---
 
 
 @needs_real_data
@@ -273,7 +266,10 @@ def test_real_rpd_parser_invariants(path: Path) -> None:
     assert r.credits and r.credits > 0
     assert r.competences and r.indicators and r.learning_outcomes
     if r.doc_kind == "discipline":
-        assert r.control_forms and r.assessments
+        assert r.control_forms
+        # в части РПД в 3.1.4 нет таблицы «индикатор → КИМ» (только перечень вопросов):
+        # тогда об этом должно быть предупреждение
+        assert r.assessments or any("оценочных средств" in w for w in r.warnings)
     assert all(INDICATOR_RE.fullmatch(i.code) for i in r.indicators)
     assert all(o.competence_codes and o.kind for o in r.learning_outcomes)
     assert all(f.intermediate for f in r.control_forms)
@@ -292,12 +288,9 @@ def test_real_corpus_has_no_unclassified_outcomes() -> None:
 
 @needs_real_data
 def test_real_math_analysis_exact_values() -> None:
-    path = next(
-        (p for p in REAL_RPD if "Математический_анализ_I" in unicodedata.normalize("NFC", p.name)),
-        None,
-    )
+    path = find_md("Математический анализ I")
     if path is None:
-        pytest.skip("нет «Математический анализ I» в md_new")
+        pytest.skip("нет «Математический анализ I» в data/")
     r = extract_rpd_file(path)
     assert (r.doc_kind, r.title, r.title_en) == (
         "discipline",
@@ -324,9 +317,9 @@ def test_real_math_analysis_exact_values() -> None:
 
 @needs_real_data
 def test_real_practice_exact_values() -> None:
-    path = next((p for p in REAL_RPD if "практика" in unicodedata.normalize("NFC", p.name)), None)
+    path = find_md("С2-5_ТОП__Учебная практика")
     if path is None:
-        pytest.skip("нет РПП в md_new")
+        pytest.skip("нет РПП в data/")
     r = extract_rpd_file(path)
     assert (r.doc_kind, r.registration_number, r.credits) == ("practice", "064682", 18.0)
     assert r.title == "Учебная практика (проектно-технологическая)"
@@ -335,7 +328,7 @@ def test_real_practice_exact_values() -> None:
     assert first.text == "алгоритмы решения типовых задач, области и способы их применения"
 
 
-# --- формат md_new: заголовки «###» в титуле, переносы строк в ячейках как <br> ------------------
+# --- формат вывода парсера: заголовки «###» в титуле, переносы строк в ячейках как <br> ---
 
 _NEW_FORMAT = """### Санкт-Петербургский государственный университет
 
@@ -582,9 +575,9 @@ def test_practice_without_control_tables_gives_warnings_not_garbage() -> None:
 
 @needs_real_data
 def test_real_practice_has_outcomes_but_no_control_forms() -> None:
-    path = next((p for p in REAL_RPD if "практика" in unicodedata.normalize("NFC", p.name)), None)
+    path = find_md("С2-5_ТОП__Учебная практика")
     if path is None:
-        pytest.skip("нет РПП в md_new")
+        pytest.skip("нет РПП в data/")
     r = extract_rpd_file(path)
     assert r.doc_kind == "practice" and r.learning_outcomes
     assert r.control_forms == []
