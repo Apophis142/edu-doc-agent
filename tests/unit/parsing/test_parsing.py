@@ -114,13 +114,36 @@ def test_blocks(rpd: Path) -> None:
     ]
 
 
-def test_markdown(rpd: Path) -> None:
-    md = parse_document(rpd).to_markdown()
-    assert md.startswith("# Раздел 1. Характеристики\n\n## 1.2. Вид практики\n\n### Аннотация\n")
-    assert "- изучить материал лекции;" in md
-    assert "| Компетенция | Результаты |  |\n| --- | --- | --- |\n" in md
-    assert r"| ПК-1 | ПК-1.3 | Первая строка<br>вторая \| строка |" in md
-    assert "КОЛОНТИТУЛ" not in md
+MARKDOWN_CONTRACT = """\
+# Раздел 1. Характеристики
+
+## 1.2. Вид практики
+
+### Аннотация
+
+Целью курса является ...
+
+- изучить материал лекции;
+
+Решите x+1=0
+
+Задание
+
+| Компетенция | Результаты |  |
+| --- | --- | --- |
+| ОПК-2 | ОПК-2.1 | Знать: формы |
+| ОПК-2 | ОПК-2.2 | Уметь: SQL |
+| ПК-1 | ПК-1.3 | Первая строка<br>вторая \\| строка |
+"""
+
+
+def test_markdown_contract(rpd: Path) -> None:
+    """Формат Markdown — контракт с модулем извлечения (см. docstring parsing/models.py).
+
+    Если тест упал из-за намеренного изменения формата — обновите контракт и предупредите
+    тех, кто работает с extraction: от этого формата зависят их регулярные выражения.
+    """
+    assert parse_document(rpd).to_markdown() == MARKDOWN_CONTRACT
 
 
 def test_numbering_and_cleanup(characteristic: Path) -> None:
