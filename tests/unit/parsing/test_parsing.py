@@ -10,6 +10,7 @@ from docx.oxml.ns import nsdecls
 from edu_doc_agent.parsing import (
     Block,
     BlockKind,
+    CellSpan,
     ParsedDocument,
     UnsupportedFormatError,
     parse_document,
@@ -112,6 +113,42 @@ def test_blocks(rpd: Path) -> None:
         ["ОПК-2", "ОПК-2.2", "Уметь: SQL"],  # объединение по вертикали -> повтор
         ["ПК-1", "ПК-1.3", "Первая строка\nвторая | строка"],
     ]
+
+
+def test_merged_cells_are_described_by_spans(tmp_path: Path) -> None:
+    """Как таблица 2.1 РПД: двухуровневая шапка с объединениями и служебная строка."""
+    doc = Document()
+    t = doc.add_table(rows=4, cols=4)
+    t.cell(0, 0).text = "Период обучения"
+    t.cell(0, 0).merge(t.cell(1, 0))  # по вертикали — две строки шапки
+    t.cell(0, 1).text = "Контактная работа"
+    t.cell(0, 1).merge(t.cell(0, 2))  # по горизонтали — группа над двумя столбцами
+    t.cell(1, 1).text = "лекции"
+    t.cell(1, 2).text = "семинары"
+    t.cell(0, 3).text = "Трудоёмкость"
+    t.cell(0, 3).merge(t.cell(1, 3))
+    t.cell(2, 0).text = "ОСНОВНАЯ ТРАЕКТОРИЯ"
+    t.cell(2, 0).merge(t.cell(2, 3))  # служебная строка на всю ширину
+    for i, value in enumerate(["Семестр 1", "30", "30", "3"]):
+        t.cell(3, i).text = value
+    path = tmp_path / "hours.docx"
+    doc.save(path)
+
+    (table,) = parse_document(path).tables
+    assert table.rows == [  # плоская сетка (и Markdown) — без изменений
+        ["Период обучения", "Контактная работа", "", "Трудоёмкость"],
+        ["Период обучения", "лекции", "семинары", "Трудоёмкость"],
+        ["ОСНОВНАЯ ТРАЕКТОРИЯ", "", "", ""],
+        ["Семестр 1", "30", "30", "3"],
+    ]
+    assert table.spans == [
+        CellSpan(row=0, col=0, row_span=2),
+        CellSpan(row=0, col=1, col_span=2),
+        CellSpan(row=0, col=3, row_span=2),
+        CellSpan(row=2, col=0, col_span=4),
+    ]
+    spans = parse_document(path).to_dict()["blocks"][0]["spans"]
+    assert spans[0] == {"row": 0, "col": 0, "row_span": 2, "col_span": 1}  # так видит extraction
 
 
 MARKDOWN_CONTRACT = """\

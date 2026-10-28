@@ -10,7 +10,7 @@ from docx.oxml.ns import qn
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 
-from edu_doc_agent.parsing.models import BaseParser, Block, BlockKind, ParsedDocument
+from edu_doc_agent.parsing.models import BaseParser, Block, BlockKind, CellSpan, ParsedDocument
 
 _TEXT_XPATH = (
     ".//w:t[not(ancestor::*[local-name()='Fallback'])] | .//m:t | .//w:r/w:tab | .//w:r/w:br"
@@ -190,19 +190,34 @@ def _format_number(n: int, fmt: str) -> str:
 
 
 def _table(table: Table) -> Block | None:
-    rows = []
+    grid = []  # [(элемент ячейки, текст)] по строкам; пустые строки пропускаем
     for row in table.rows:
         cells = row.cells
-        values = [
-            "" if i > 0 and cell._tc is cells[i - 1]._tc else _cell_text(cell)
+        line = [
+            (cell._tc, "" if i > 0 and cell._tc is cells[i - 1]._tc else _cell_text(cell))
             for i, cell in enumerate(cells)
         ]
-        if any(values):
-            rows.append(values)
-    if not rows:
+        if any(text for _, text in line):
+            grid.append(line)
+    if not grid:
         return None
-    width = max(len(row) for row in rows)
-    return Block(BlockKind.TABLE, rows=[row + [""] * (width - len(row)) for row in rows])
+    width = max(len(line) for line in grid)
+    rows = [[text for _, text in line] + [""] * (width - len(line)) for line in grid]
+    return Block(BlockKind.TABLE, rows=rows, spans=_spans(grid))
+
+
+def _spans(grid: list) -> list[CellSpan]:
+    """Объединенные ячейки: позиции сетки, которые занимает один и тот же элемент ячейки"""
+    positions: dict[int, list[tuple[int, int]]] = {}
+    for r, line in enumerate(grid):
+        for c, (tc, _) in enumerate(line):
+            positions.setdefault(id(tc), []).append((r, c))
+    spans = []
+    for cells in positions.values():
+        rows, cols = {r for r, _ in cells}, {c for _, c in cells}
+        if len(cells) > 1:
+            spans.append(CellSpan(min(rows), min(cols), len(rows), len(cols)))
+    return sorted(spans, key=lambda s: (s.row, s.col))
 
 
 def _cell_text(cell) -> str:

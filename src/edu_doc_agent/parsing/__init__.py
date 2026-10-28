@@ -3,12 +3,13 @@
 from pathlib import Path
 
 from edu_doc_agent.parsing.docx_parser import DocxParser
-from edu_doc_agent.parsing.models import BaseParser, Block, BlockKind, ParsedDocument
+from edu_doc_agent.parsing.models import BaseParser, Block, BlockKind, CellSpan, ParsedDocument
 
 __all__ = [
     "BaseParser",
     "Block",
     "BlockKind",
+    "CellSpan",
     "ParsedDocument",
     "UnsupportedFormatError",
     "parse_document",
