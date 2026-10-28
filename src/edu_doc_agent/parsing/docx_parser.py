@@ -19,7 +19,8 @@ _HEADING_STYLE = re.compile(r"^(?:heading|заголовок)\s*(\d)$", re.IGNOR
 _SECTION = re.compile(r"^раздел\s+\d", re.IGNORECASE)  # раздел
 _NUMBERED = re.compile(r"^(\d+(?:\.\d+)+)\.?\s")  # нумерация
 _BULLET = re.compile(r"^[•·▪◦‣−–—-]\s+")  # маркер
-_FILLER = re.compile(r"[_.…\-–—]{4,}")  # поля для заполнения
+_BLANK = re.compile(r"_{4,}")  # поле для заполнения '______' -> '...'
+_RULE = re.compile(r"[\s_.…\-–—=*]{4,}")  # абзац целиком из таких символов - линия-разделитель
 _SPACES = re.compile(r"[ \t\u00a0]+")  # пробелы, табы, неразрывные пробелы
 _MAX_HEADING_LEN = 200
 
@@ -57,7 +58,10 @@ def _iter_body(doc: DocxDocument, element) -> Iterator[Paragraph | Table]:
 
 def _paragraph(p: Paragraph, numbering: "_Numbering") -> Block | None:
     number, list_level, is_section = numbering.next(p)
-    text = _clean(_text(p._p))
+    raw = _text(p._p)
+    if _RULE.fullmatch(raw.strip()):  # '--------', '________', '........' без текста
+        return None
+    text = _clean(raw)
     if not text:
         return None
     style = p.style.name if p.style is not None else ""
@@ -93,10 +97,9 @@ def _text(element) -> str:
 
 
 def _clean(text: str, keep_newlines: bool = False) -> str:
-    text = _FILLER.sub("…", text.replace("\xad", ""))
+    text = _BLANK.sub("…", text.replace("\xad", ""))
     lines = [_SPACES.sub(" ", line).strip() for line in text.splitlines()]
-    lines = [line for line in lines if line.strip("… ")]
-    return ("\n" if keep_newlines else " ").join(lines)
+    return ("\n" if keep_newlines else " ").join(line for line in lines if line)
 
 
 def _is_bold(p: Paragraph) -> bool:

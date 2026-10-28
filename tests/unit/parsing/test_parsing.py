@@ -138,6 +138,26 @@ def test_numbering_and_cleanup(characteristic: Path) -> None:
     assert parse_document(characteristic).to_markdown() == expected
 
 
+def test_filler_cleanup_keeps_regular_text(tmp_path: Path) -> None:
+    doc = Document()
+    doc.add_paragraph("Подпись ____________ (ФИО)")
+    doc.add_paragraph("См. пункты 1.1–1.4 .... и далее ---- без изменений")
+    doc.add_paragraph("--------")
+    doc.add_paragraph("........")
+    t = doc.add_table(rows=1, cols=3)
+    for i, value in enumerate(["----", "....", "______"]):
+        t.cell(0, i).text = value
+    path = tmp_path / "form.docx"
+    doc.save(path)
+
+    blocks = parse_document(path).blocks
+    assert [b.text for b in blocks[:-1]] == [
+        "Подпись … (ФИО)",  # поле для заполнения -> '…'
+        "См. пункты 1.1–1.4 .... и далее ---- без изменений",  # обычный текст не трогаем
+    ]  # абзацы-линии '--------' и '........' убраны
+    assert blocks[-1].rows == [["----", "....", "…"]]  # в таблицах '----' и '....' остаются
+
+
 def test_list_indent_is_never_deeper_than_parent() -> None:
     doc = ParsedDocument(
         source="x",
