@@ -165,15 +165,34 @@ def _extract_active_forms(sections: list[MdSection], file: str, result: RPDExtra
         return
     for lineno, line in _body(section):
         for sentence in re.split(r"(?<=[.!?])\s+(?=[А-ЯЁA-Z])", line):
-            if not (m := _HOURS_RE.search(sentence)) or "актив" not in sentence.lower():
-                continue
-            result.active_forms.append(
-                ActiveForm(
-                    text=sentence.strip(),
-                    hours=float(m.group(1).replace(",", ".")),
-                    source=_ref(section, lineno, file),
-                )
-            )
+            matches = list(_HOURS_RE.finditer(sentence))
+            # «Лекции, 8 ч Лабораторных работ, 50 ч.» — несколько форм подряд: по записи на форму;
+            # «составляет 32 часа: семинары — 16 часов, …» — одно предложение с общим итогом
+            if len(matches) > 1 and ":" not in sentence:
+                start = 0
+                for m in matches:
+                    _add_active(sentence[start : m.end()], m, section, lineno, file, result)
+                    start = m.end()
+            elif matches:
+                _add_active(sentence, matches[0], section, lineno, file, result)
+
+
+def _add_active(
+    text: str,
+    match: re.Match[str],
+    section: MdSection,
+    lineno: int,
+    file: str,
+    result: RPDExtraction,
+) -> None:
+    hours = _HOURS_RE.search(text) or match
+    result.active_forms.append(
+        ActiveForm(
+            text=text.strip(" ,;"),
+            hours=float(hours.group(1).replace(",", ".")),
+            source=_ref(section, lineno, file),
+        )
+    )
 
 
 # --- 2.2 часы по темам -------------------------------------------------------------------

@@ -355,3 +355,17 @@ def test_merged_cells_table_with_extra_columns(tmp_path: Path) -> None:
     ]
     result = extract_rpd("\n".join(widened), file="x.md")
     assert result.workload_table  # лишний столбец не ломает разбор, в отличие от позиционного
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("Практические занятия – 48 час. Решение задач по пособию.", [48]),
+        ("Лекции, 8 ч Лабораторных работ, 50 ч. Самостоятельной работы, 24 ч.", [8, 50, 24]),
+        ("Консультация (2 часа), экзамен в устной форме.", [2]),
+        ("Объём составляет 32 часа: семинары — 16 часов, практические занятия — 16 часов.", [32]),
+    ],
+)
+def test_active_forms_phrasings_from_real_documents(line: str, expected: list[int]) -> None:
+    text = f"## 1.4. Перечень активных и интерактивных форм учебных занятий\n\n{line}\n"
+    assert [f.hours for f in extract_rpd(text, "x.md").active_forms] == expected
