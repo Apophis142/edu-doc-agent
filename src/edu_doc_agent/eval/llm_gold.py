@@ -21,7 +21,9 @@ from edu_doc_agent.extraction.llm_extract import (
 )
 from edu_doc_agent.llm import LLMClient
 
-DEFAULT_GOLD = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "llm_gold.json"
+_FIXTURES = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
+DEFAULT_GOLD = _FIXTURES / "llm_gold.json"  # на ней настраивались промпты
+HOLDOUT = _FIXTURES / "llm_holdout.json"  # размечена до запуска модели, промпты по ней не правим
 
 # ориентиры из ADR-0002: текстовые поля >= 0.8
 THRESHOLDS = {"prerequisites": 0.8, "active_forms": 0.8, "grading_rules": 0.8}

@@ -4,13 +4,22 @@ import json
 
 import pytest
 
-from edu_doc_agent.eval.llm_gold import THRESHOLDS, GoldCase, evaluate, load_gold, score_case
+from edu_doc_agent.eval.llm_gold import (
+    HOLDOUT,
+    THRESHOLDS,
+    GoldCase,
+    evaluate,
+    load_gold,
+    score_case,
+)
 from edu_doc_agent.extraction import llm_prompts
 from edu_doc_agent.extraction.llm_extract import TASKS_BY_NAME, normalize, quote_in_text
 from edu_doc_agent.llm import FakeLLMClient, LLMCall
 from tests.real_data import find_md
 
-CASES = load_gold()
+DEV_CASES = load_gold()
+HOLDOUT_CASES = load_gold(HOLDOUT)
+CASES = DEV_CASES + HOLDOUT_CASES
 _ITEMS = {"prerequisites": "items", "active_forms": "items", "grading_rules": "rules"}
 
 
@@ -75,7 +84,7 @@ def _oracle(call: LLMCall) -> str:
 
 
 def test_oracle_model_gets_perfect_score() -> None:
-    report = evaluate(FakeLLMClient(respond=_oracle))
+    report = evaluate(FakeLLMClient(respond=_oracle), CASES)
     assert report.passed(), report.summary()
     assert all(s.f1 == 1.0 and s.attribute_accuracy == 1.0 for s in report.by_task.values())
 
@@ -182,3 +191,18 @@ def test_metric_ignores_case_endings_and_trailing_dot_in_quotes() -> None:
         {"rules": [{"condition": "c", "effect": "e", "quote": "Работа зачтена, если все верно"}]},
     )
     assert (rules.tp, rules.fp, rules.fn) == (1, 0, 0)
+
+
+def test_holdout_is_disjoint_from_dev_set() -> None:
+    assert not {c.id for c in DEV_CASES} & {c.id for c in HOLDOUT_CASES}
+    assert not {c.text for c in DEV_CASES} & {c.text for c in HOLDOUT_CASES}
+    assert len(HOLDOUT_CASES) >= 20
+
+
+@pytest.mark.llm
+def test_real_model_on_holdout() -> None:
+    """Честная оценка: на этих кейсах промпты не настраивались."""
+    from edu_doc_agent.llm import OpenAICompatibleClient
+
+    report = evaluate(OpenAICompatibleClient.from_settings(), HOLDOUT_CASES)
+    assert report.passed(), report.summary()
