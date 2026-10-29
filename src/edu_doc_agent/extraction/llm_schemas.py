@@ -10,7 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from edu_doc_agent.extraction.models import SourceRef
+from edu_doc_agent.extraction.source import SourceRef
 
 
 class _Schema(BaseModel):

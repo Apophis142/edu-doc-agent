@@ -8,20 +8,15 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
+from edu_doc_agent.extraction.llm_schemas import LLMExtraction
+from edu_doc_agent.extraction.source import SourceRef
+
 OutcomeKind = Literal["знает", "умеет", "владеет"]
 DocKind = Literal["discipline", "practice"]
 
 
 class _Model(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
-
-class SourceRef(_Model):
-    """Место в исходном документе."""
-
-    file: str
-    section: str | None = None
-    line: int | None = Field(default=None, description="Номер строки в md-файле, с 1")
 
 
 class Competence(_Model):
@@ -308,4 +303,7 @@ class RPDExtraction(_Model):
     practice: PracticeInfo | None = None
     prof_standards: list[ProfStandard] = Field(default_factory=list)
     standard_links: list[StandardLink] = Field(default_factory=list)
+    llm: LLMExtraction | None = Field(
+        default=None, description="Смысловые поля от LLM; None, если LLM не подключали"
+    )
     warnings: list[str] = Field(default_factory=list)

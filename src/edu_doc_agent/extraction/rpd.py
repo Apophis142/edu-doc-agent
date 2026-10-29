@@ -20,6 +20,7 @@ import re
 from pathlib import Path
 
 from edu_doc_agent.extraction.freetext import extract_free_text
+from edu_doc_agent.extraction.llm_extract import extract_with_llm
 from edu_doc_agent.extraction.md_utils import MdTable, clean_text, parse_tables
 from edu_doc_agent.extraction.models import (
     AssessmentLink,
@@ -59,16 +60,23 @@ from edu_doc_agent.extraction.patterns import (
 )
 from edu_doc_agent.extraction.sections import extract_sections
 from edu_doc_agent.extraction.workload_table import check_workload, extract_workload_table
+from edu_doc_agent.llm import LLMClient
 
 _TITLE_SCAN_LINES = 40
 _HEADING_MARK_RE = re.compile(r"^#+\s*")
 
 
-def extract_rpd_file(path: Path) -> RPDExtraction:
-    return extract_rpd(path.read_text(encoding="utf-8"), file=path.name)
+def extract_rpd_file(path: Path, llm: LLMClient | None = None) -> RPDExtraction:
+    return extract_rpd(path.read_text(encoding="utf-8"), file=path.name, llm=llm)
 
 
-def extract_rpd(text: str, file: str) -> RPDExtraction:
+def extract_rpd(text: str, file: str, llm: LLMClient | None = None) -> RPDExtraction:
+    """Правила и Yargy всегда; смысловые поля через LLM — только если передан клиент.
+
+    Без `llm` работа полностью офлайн и детерминирована. С `llm` добавляется `result.llm`
+    (пререквизиты, активные формы, правила оценивания с цитатами), а его предупреждения и
+    расхождения с правилами попадают в `result.warnings`.
+    """
     result = RPDExtraction(file=file)
     _extract_title_block(text, result)
 
@@ -99,7 +107,23 @@ def extract_rpd(text: str, file: str) -> RPDExtraction:
         result.warnings.append("не найдены формы контроля по семестрам")
     if not result.workload_table:
         result.warnings.append("не найдена таблица трудоёмкости по видам занятий")
+    if llm is not None:
+        result.llm = extract_with_llm(text, file, llm)
+        result.warnings.extend(f"LLM: {w}" for w in result.llm.warnings)
+        _cross_check_llm(result)
     return result
+
+
+def _cross_check_llm(result: RPDExtraction) -> None:
+    """Расхождения между LLM и правилами: повод для ручной проверки, а не для исправления."""
+    assert result.llm is not None
+    stated = result.llm.active_total_hours
+    table = {w.active_hours for w in result.workload_table if not w.is_total and w.active_hours}
+    if stated is not None and table and stated not in table:
+        result.warnings.append(
+            f"LLM: объём активных форм в 1.4 ({stated:g} ч) не совпадает с таблицей 2.1 "
+            f"({', '.join(f'{h:g}' for h in sorted(table))})"
+        )
 
 
 # --- титул ---------------------------------------------------------------------------------

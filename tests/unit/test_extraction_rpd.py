@@ -625,6 +625,7 @@ def test_result_schema_fields_are_stable() -> None:
         "practice",
         "prof_standards",
         "standard_links",
+        "llm",
         "warnings",
     }
     assert set(schema["$defs"]["ControlForm"]["properties"]) == {

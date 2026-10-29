@@ -23,7 +23,7 @@ from edu_doc_agent.extraction.llm_schemas import (
     PrerequisitesOutput,
 )
 from edu_doc_agent.extraction.md_utils import MdSection, clean_text, split_sections
-from edu_doc_agent.extraction.models import SourceRef
+from edu_doc_agent.extraction.source import SourceRef
 from edu_doc_agent.llm import LLMClient
 
 MAX_RETRIES = 2  # повторов после первого ответа, как в ADR-0002

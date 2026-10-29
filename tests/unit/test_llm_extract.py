@@ -94,3 +94,60 @@ def test_document_without_sections_makes_no_calls() -> None:
     client = FakeLLMClient(respond=_by_prompt)
     result = extract_with_llm("# Пусто\n\nтекст\n", "x.md", client)
     assert client.calls == [] and result.warnings == []
+
+
+# --- подключение к extract_rpd -------------------------------------------------------------
+
+
+def test_extract_rpd_without_llm_is_offline_and_has_no_llm_part() -> None:
+    from edu_doc_agent.extraction import extract_rpd
+
+    assert extract_rpd(MD, "x.md").llm is None
+
+
+def test_extract_rpd_with_llm_adds_semantic_fields_and_keeps_rules() -> None:
+    from edu_doc_agent.extraction import extract_rpd
+
+    client = FakeLLMClient(respond=_by_prompt)
+    result = extract_rpd(MD, "x.md", llm=client)
+    assert result.llm is not None
+    assert [p.name for p in result.llm.prerequisites] == ["алгебра и геометрия"]
+    # правила (Yargy) работают независимо от LLM
+    assert {"Алгебра и геометрия", "Основы дискретной математики"} <= {
+        p.name for p in result.prerequisites
+    }
+    assert len(client.calls) == 3
+
+
+def test_llm_warnings_and_disagreement_with_table_reach_result_warnings() -> None:
+    from edu_doc_agent.extraction import extract_rpd
+
+    bad = {"items": [{**PREREQ["items"][0], "quote": "курс квантовой механики"}]}
+    active = {**ACTIVE, "total_hours": 34}  # в 1.4 такого числа нет
+    replies = {"пререквизиты": bad, "активных и интерактивных": active}
+
+    def respond(call: LLMCall) -> str:
+        for key, data in replies.items():
+            if key in call.user:
+                return json.dumps(data, ensure_ascii=False)
+        return json.dumps(RULES)
+
+    result = extract_rpd(MD, "x.md", llm=FakeLLMClient(respond=respond))
+    assert any(w.startswith("LLM: prerequisites: цитата не найдена") for w in result.warnings)
+    assert any("не найден в тексте" in w for w in result.warnings)
+
+
+def test_llm_total_that_differs_from_table_2_1_is_reported() -> None:
+    from edu_doc_agent.extraction import extract_rpd
+
+    text = MD.replace("Консультации в активной форме – 2 часа.", "Объём составляет 10 часов.")
+    active = {"total_hours": 10, "items": []}
+
+    def respond(call: LLMCall) -> str:
+        if "активных и интерактивных" in call.user:
+            return json.dumps(active)
+        return json.dumps(PREREQ if "пререквизиты" in call.user else RULES, ensure_ascii=False)
+
+    result = extract_rpd(text, "x.md", llm=FakeLLMClient(respond=respond))
+    assert result.llm.active_total_hours == 10
+    assert any("не совпадает с таблицей 2.1 (34)" in w for w in result.warnings)

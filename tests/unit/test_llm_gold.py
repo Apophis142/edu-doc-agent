@@ -152,3 +152,12 @@ def test_quote_matching_ignores_case_dashes_and_yo() -> None:
     assert quote_in_text("ПРАКТИЧЕСКИЕ занятия – 48 час", "практические занятия - 48 час.")
     assert quote_in_text("учёта", "без учета")
     assert not quote_in_text("", "любой текст")
+
+
+@pytest.mark.llm
+def test_real_model_meets_thresholds_on_gold() -> None:
+    """Настоящая модель из .env (LLM_BASE_URL, LLM_API_KEY, LLM_MODEL): `pytest --run-llm`."""
+    from edu_doc_agent.llm import OpenAICompatibleClient
+
+    report = evaluate(OpenAICompatibleClient.from_settings())
+    assert report.passed(), report.summary()
