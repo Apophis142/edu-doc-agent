@@ -172,6 +172,9 @@ class ActiveForm(_Model):
 
     text: str
     hours: float | None = Field(default=None, description="None, если часы не названы")
+    is_total: bool = Field(
+        default=False, description="Общий объём активных форм («составляет 40 часов: …»)"
+    )
     source: SourceRef
 
 

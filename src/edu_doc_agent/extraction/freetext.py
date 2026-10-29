@@ -130,6 +130,12 @@ _AREA_ITEM = rule(
     not_(or_(_STOP, _DISCIPLINE_WORD)), not_(_STOP).repeatable(max=5).optional()
 ).interpretation(Names.names)
 _AREA_LIST = rule(_AREA_ITEM, rule(SEPARATOR, _PLAIN_ITEM).repeatable().optional())
+# без предлога «по»: «Знание основ комбинаторного анализа»; «по» и «в» тут значат другое правило
+_BARE_AREA_ITEM = rule(
+    not_(or_(_STOP, _DISCIPLINE_WORD, eq("по"), eq("в"), eq("на"))),
+    not_(_STOP).repeatable(max=5).optional(),
+).interpretation(Names.names)
+_BARE_AREA_LIST = rule(_BARE_AREA_ITEM, rule(SEPARATOR, _PLAIN_ITEM).repeatable().optional())
 _IN_AREA = or_(
     rule(eq("по")), rule(eq("в"), normalized("область")), rule(eq("в"), normalized("сфера"))
 )
@@ -142,7 +148,11 @@ PREREQUISITE_GROUPS: dict[str, list] = {
         rule(eq("по"), _DISCIPLINE_WORD, _PLAIN_LIST),
         rule(_KNOWLEDGE_WORD, eq("по"), _DISCIPLINE_WORD, _PLAIN_LIST),
     ],
-    "область знаний": [rule(_KNOWLEDGE_WORD, _IN_AREA, _AREA_LIST)],
+    "область знаний": [
+        rule(_KNOWLEDGE_WORD, _IN_AREA, _AREA_LIST),
+        # «Знание основ комбинаторного анализа, математического анализа.» — без «по»
+        rule(normalized("знание"), _BARE_AREA_LIST),
+    ],
 }
 
 # --- семестры ----------------------------------------------------------------------------------
@@ -301,7 +311,9 @@ def _extract_prerequisites(
     for section in sections:
         if section.number != "1.2":
             continue
-        for lineno, line in _lines(section):
+        for lineno, raw_line in _lines(section):
+            # в части документов названия в прямых кавычках: "Основы программирования"
+            line = re.sub(r'"([^"«»]+)"', r"«\1»", raw_line)
             for kind in PREREQUISITE_GROUPS:
                 for match in parsers[f"prereq:{kind}"].findall(line):
                     for raw in _as_list(match.fact.names):

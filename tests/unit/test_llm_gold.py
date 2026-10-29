@@ -5,6 +5,7 @@ import json
 import pytest
 
 from edu_doc_agent.eval.llm_gold import (
+    BLIND,
     HOLDOUT,
     THRESHOLDS,
     GoldCase,
@@ -19,7 +20,8 @@ from tests.real_data import find_md
 
 DEV_CASES = load_gold()
 HOLDOUT_CASES = load_gold(HOLDOUT)
-CASES = DEV_CASES + HOLDOUT_CASES
+BLIND_CASES = load_gold(BLIND)
+CASES = DEV_CASES + HOLDOUT_CASES + BLIND_CASES
 _ITEMS = {"prerequisites": "items", "active_forms": "items", "grading_rules": "rules"}
 
 
@@ -193,10 +195,14 @@ def test_metric_ignores_case_endings_and_trailing_dot_in_quotes() -> None:
     assert (rules.tp, rules.fp, rules.fn) == (1, 0, 0)
 
 
-def test_holdout_is_disjoint_from_dev_set() -> None:
-    assert not {c.id for c in DEV_CASES} & {c.id for c in HOLDOUT_CASES}
-    assert not {c.text for c in DEV_CASES} & {c.text for c in HOLDOUT_CASES}
-    assert len(HOLDOUT_CASES) >= 20
+def test_sets_are_disjoint() -> None:
+    sets = [DEV_CASES, HOLDOUT_CASES, BLIND_CASES]
+    for i, a in enumerate(sets):
+        for b in sets[i + 1 :]:
+            assert not {c.id for c in a} & {c.id for c in b}
+            assert not {c.text for c in a} & {c.text for c in b}
+            assert not {c.source for c in a} & {c.source for c in b} or a is not sets[0]
+    assert len(HOLDOUT_CASES) >= 20 and len(BLIND_CASES) >= 20
 
 
 @pytest.mark.llm

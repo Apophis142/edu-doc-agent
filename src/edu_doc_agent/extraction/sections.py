@@ -159,40 +159,45 @@ def _extract_goals(sections: list[MdSection], file: str, result: RPDExtraction) 
         result.goals = "\n".join(ln for _, ln in body)
 
 
+_OF_THEM_RE = re.compile(r"из них\s+(\d+(?:[.,]\d+)?)\s*(?:час\w*|ч\b\.?)", re.I)
+_TOTAL_WORD_RE = re.compile(r"составля|объ[её]м", re.I)
+
+
 def _extract_active_forms(sections: list[MdSection], file: str, result: RPDExtraction) -> None:
     section = _find(sections, "1.4")
     if section is None or "активн" not in section.heading.lower():
         return
     for lineno, line in _body(section):
+        ref = _ref(section, lineno, file)
         for sentence in re.split(r"(?<=[.!?])\s+(?=[А-ЯЁA-Z])", line):
             matches = list(_HOURS_RE.finditer(sentence))
-            # «Лекции, 8 ч Лабораторных работ, 50 ч.» — несколько форм подряд: по записи на форму;
-            # «составляет 32 часа: семинары — 16 часов, …» — одно предложение с общим итогом
-            if len(matches) > 1 and ":" not in sentence:
-                start = 0
-                for m in matches:
-                    _add_active(sentence[start : m.end()], m, section, lineno, file, result)
-                    start = m.end()
-            elif matches:
-                _add_active(sentence, matches[0], section, lineno, file, result)
-
-
-def _add_active(
-    text: str,
-    match: re.Match[str],
-    section: MdSection,
-    lineno: int,
-    file: str,
-    result: RPDExtraction,
-) -> None:
-    hours = _HOURS_RE.search(text) or match
-    result.active_forms.append(
-        ActiveForm(
-            text=text.strip(" ,;"),
-            hours=float(hours.group(1).replace(",", ".")),
-            source=_ref(section, lineno, file),
-        )
-    )
+            if not matches:
+                continue
+            # «16 часов, из них 2 часа в активной форме»: в активной форме только 2 часа
+            if of_them := _OF_THEM_RE.search(sentence):
+                hours = float(of_them.group(1).replace(",", "."))
+                result.active_forms.append(
+                    ActiveForm(text=sentence.strip(), hours=hours, source=ref)
+                )
+                continue
+            colon = sentence.find(":")
+            has_total = len(matches) > 1 and colon > 0 and _TOTAL_WORD_RE.search(sentence[:colon])
+            # «составляет 40 часов: семинары — 16 часов, практические — 24 часа»: общий объём
+            # и состав; «Лекции, 8 ч Лабораторных работ, 50 ч.» — по записи на форму
+            start = 0
+            for i, m in enumerate(matches):
+                text = sentence[start : m.end()].strip(" ,;:")
+                result.active_forms.append(
+                    ActiveForm(
+                        text=text,
+                        hours=float(m.group(1).replace(",", ".")),
+                        is_total=bool(has_total and i == 0),
+                        source=ref,
+                    )
+                )
+                start = m.end()
+                if has_total and i == 0:
+                    start = colon + 1
 
 
 # --- 2.2 часы по темам -------------------------------------------------------------------
