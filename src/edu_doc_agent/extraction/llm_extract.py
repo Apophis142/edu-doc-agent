@@ -72,8 +72,16 @@ def normalize(text: str) -> str:
     return " ".join(text.split())
 
 
+_ELLIPSIS_RE = re.compile(r"\.{3}|…")
+
+
 def quote_in_text(quote: str, text: str) -> bool:
-    return bool(quote.strip()) and normalize(quote) in normalize(text)
+    """Цитата должна быть подстрокой текста. Многоточие внутри разрешено: модель так сокращает
+    длинные места, поэтому каждый кусок между многоточиями проверяется отдельно."""
+    parts = [normalize(p).strip(" .,;:") for p in _ELLIPSIS_RE.split(quote)]
+    parts = [p for p in parts if p]
+    haystack = normalize(text)
+    return bool(parts) and all(p in haystack for p in parts)
 
 
 def run_task(task: LLMTask, text: str, client: LLMClient) -> tuple[BaseModel | None, str | None]:

@@ -50,12 +50,30 @@ def load_gold(path: Path = DEFAULT_GOLD) -> list[GoldCase]:
     return [GoldCase(**c) for c in data["cases"]]
 
 
+def _stem(text: str) -> str:
+    """Слова усечены до 5 букв: «лабораторных работ» и «лабораторные работы» совпадают."""
+    return " ".join(w[:5] for w in normalize(text).split())
+
+
 def _key(task: str, item: dict) -> tuple:
     if task == "prerequisites":
-        return (normalize(item["name"]),)
+        return (_stem(item["name"]),)
     if task == "active_forms":
-        return (normalize(item["kind"]), item["hours"])
-    return (normalize(item["quote"]),)
+        return (_stem(item["kind"]), item["hours"])
+    return (normalize(item["quote"]).strip(" .,;:"),)
+
+
+def _match(task: str, pred: dict[tuple, dict], gold: dict[tuple, dict]) -> list[tuple]:
+    """Пары ключей (предсказание, эталон). Правила оценивания сопоставляются по цитате, одна из
+    которых содержит другую: модель то захватывает точку, то нет."""
+    if task != "grading_rules":
+        return [(k, k) for k in pred.keys() & gold.keys()]
+    pairs = []
+    for pk in pred:
+        gk = next((g for g in gold if pk[0] in g[0] or g[0] in pk[0]), None)
+        if gk is not None:
+            pairs.append((pk, gk))
+    return pairs
 
 
 @dataclass
@@ -92,15 +110,16 @@ def score_case(task: str, predicted: dict, expected: dict) -> Score:
     field_name = _ITEMS[task]
     pred = {_key(task, i): i for i in predicted.get(field_name, [])}
     gold = {_key(task, i): i for i in expected.get(field_name, [])}
+    pairs = _match(task, pred, gold)
     score = Score(
-        tp=len(pred.keys() & gold.keys()),
-        fp=len(pred.keys() - gold.keys()),
-        fn=len(gold.keys() - pred.keys()),
+        tp=len({g for _, g in pairs}),
+        fp=len(pred) - len({p for p, _ in pairs}),
+        fn=len(gold) - len({g for _, g in pairs}),
     )
-    for key in pred.keys() & gold.keys():
+    for pk, gk in pairs:
         for attr in _ATTRS[task]:
             score.attr_total += 1
-            score.attr_ok += pred[key][attr] == gold[key][attr]
+            score.attr_ok += pred[pk][attr] == gold[gk][attr]
     if task == "active_forms" and "total_hours" in expected:
         score.attr_total += 1
         score.attr_ok += predicted.get("total_hours") == expected["total_hours"]

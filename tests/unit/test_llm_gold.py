@@ -161,3 +161,24 @@ def test_real_model_meets_thresholds_on_gold() -> None:
 
     report = evaluate(OpenAICompatibleClient.from_settings())
     assert report.passed(), report.summary()
+
+
+def test_quote_with_ellipsis_is_checked_piece_by_piece() -> None:
+    text = "обладали знаниями по курсам: алгебра, математический анализ, аналитическая геометрия"
+    assert quote_in_text("знаниями по курсам: ... математический анализ", text)
+    assert not quote_in_text("знаниями по курсам: ... квантовая механика", text)
+
+
+def test_metric_ignores_case_endings_and_trailing_dot_in_quotes() -> None:
+    forms = score_case(
+        "active_forms",
+        {"items": [{"kind": "Лабораторных работ", "hours": 50, "mandatory": True, "quote": "q"}]},
+        {"items": [{"kind": "лабораторные работы", "hours": 50, "mandatory": True, "quote": "q"}]},
+    )
+    assert (forms.tp, forms.fp, forms.fn) == (1, 0, 0)
+    rules = score_case(
+        "grading_rules",
+        {"rules": [{"condition": "c", "effect": "e", "quote": "Работа зачтена, если все верно."}]},
+        {"rules": [{"condition": "c", "effect": "e", "quote": "Работа зачтена, если все верно"}]},
+    )
+    assert (rules.tp, rules.fp, rules.fn) == (1, 0, 0)
