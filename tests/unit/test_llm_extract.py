@@ -282,6 +282,19 @@ def test_same_quote_and_hours_are_one_form_and_kinds_are_lowercase() -> None:
     ]
 
 
+def test_forms_with_own_equal_hours_in_one_sentence_are_not_merged() -> None:
+    quote = "Объём составляет 32 часа: семинары — 16 часов, практические занятия — 16 часов"
+    forms = [
+        {"kind": "семинары", "hours": 16, "mandatory": True, "quote": quote},
+        {"kind": "практические занятия", "hours": 16, "mandatory": True, "quote": quote},
+    ]
+    out = postprocess(ActiveFormsOutput.model_validate({"total_hours": 32, "items": forms}))
+    assert [(f.kind, f.hours) for f in out.items] == [
+        ("семинары", 16),
+        ("практические занятия", 16),
+    ]
+
+
 def test_forms_with_unknown_hours_are_not_merged() -> None:
     forms = [
         {"kind": "семинары", "hours": None, "mandatory": True, "quote": "общая цитата"},

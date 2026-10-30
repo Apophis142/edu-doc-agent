@@ -167,7 +167,8 @@ def _merge_forms(items: list[ActiveFormItem]) -> list[ActiveFormItem]:
     """Вид занятий в нижнем регистре; одна цитата с теми же часами — одна запись.
 
     «Практические и лабораторные занятия (24 часа)» модель иногда делит на два элемента по
-    24 часа, и сумма часов получается вдвое больше.
+    24 часа, и сумма часов получается вдвое больше. Сливаем, только если число часов в цитате
+    встречается один раз: «семинары — 16 часов, практические занятия — 16 часов» — две формы.
     """
     merged: list[ActiveFormItem] = []
     for item in items:
@@ -179,6 +180,7 @@ def _merge_forms(items: list[ActiveFormItem]) -> list[ActiveFormItem]:
                 if item.hours is not None
                 and m.hours == item.hours
                 and normalize(m.quote) == normalize(item.quote)
+                and _count_number(item.quote, item.hours) == 1
             ),
             None,
         )
@@ -187,6 +189,11 @@ def _merge_forms(items: list[ActiveFormItem]) -> list[ActiveFormItem]:
         elif item.kind not in twin.kind:
             twin.kind = f"{twin.kind} и {item.kind}"
     return merged
+
+
+def _count_number(text: str, number: float) -> int:
+    """Сколько раз число стоит в тексте отдельным числом (запятая как десятичный разделитель)."""
+    return len(re.findall(rf"(?<![\d.]){number:g}(?![\d.])", text.replace(",", ".")))
 
 
 def section_text(sections: list[MdSection], with_tables: bool) -> str:
