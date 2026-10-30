@@ -6,6 +6,7 @@ import pytest
 
 from edu_doc_agent.eval.llm_gold import (
     BLIND,
+    BLIND2,
     HOLDOUT,
     THRESHOLDS,
     GoldCase,
@@ -21,7 +22,8 @@ from tests.real_data import find_md
 DEV_CASES = load_gold()
 HOLDOUT_CASES = load_gold(HOLDOUT)
 BLIND_CASES = load_gold(BLIND)
-CASES = DEV_CASES + HOLDOUT_CASES + BLIND_CASES
+BLIND2_CASES = load_gold(BLIND2)
+CASES = DEV_CASES + HOLDOUT_CASES + BLIND_CASES + BLIND2_CASES
 _ITEMS = {"prerequisites": "items", "active_forms": "items", "grading_rules": "rules"}
 
 
@@ -196,7 +198,7 @@ def test_metric_ignores_case_endings_and_trailing_dot_in_quotes() -> None:
 
 
 def test_sets_are_disjoint() -> None:
-    sets = [DEV_CASES, HOLDOUT_CASES, BLIND_CASES]
+    sets = [DEV_CASES, HOLDOUT_CASES, BLIND_CASES, BLIND2_CASES]
     for i, a in enumerate(sets):
         for b in sets[i + 1 :]:
             assert not {c.id for c in a} & {c.id for c in b}
@@ -212,3 +214,53 @@ def test_real_model_on_holdout() -> None:
 
     report = evaluate(OpenAICompatibleClient.from_settings(), HOLDOUT_CASES)
     assert report.passed(), report.summary()
+
+
+@pytest.mark.llm
+def test_real_model_on_blind2() -> None:
+    """Четвёртый набор: размечен после правок выбора разделов и таблиц, до запуска модели."""
+    from edu_doc_agent.llm import OpenAICompatibleClient
+
+    report = evaluate(OpenAICompatibleClient.from_settings(), BLIND2_CASES)
+    assert report.passed(), report.summary()
+
+
+def test_prerequisite_names_match_by_words_one_to_one() -> None:
+    gold = {
+        "items": [
+            {
+                "name": "разработка простых программ",
+                "kind": "навык",
+                "relation": "предшествует",
+                "quote": "q",
+            }
+        ]
+    }
+    longer = {"items": [{**gold["items"][0], "name": "разработка простых программ на языках"}]}
+    assert score_case("prerequisites", longer, gold).tp == 1
+    two = {
+        "items": [
+            {**gold["items"][0], "name": "аналитическая геометрия"},
+            {**gold["items"][0], "name": "дифференциальная геометрия"},
+        ]
+    }
+    merged = {"items": [{**gold["items"][0], "name": "аналитическая и дифференциальная геометрия"}]}
+    s = score_case("prerequisites", merged, two)
+    assert (s.tp, s.fp, s.fn) == (1, 0, 1)  # склейка двух названий не прощается целиком
+
+
+def test_grading_rule_cut_out_of_gold_sentence_is_not_a_false_positive() -> None:
+    gold = {
+        "rules": [
+            {"condition": "c", "effect": "e", "quote": "Вопросы — по 3 балла, задача — 4 балла"}
+        ]
+    }
+    pred = {
+        "rules": [
+            {"condition": "c", "effect": "e", "quote": "Вопросы — по 3 балла, задача — 4 балла"},
+            {"condition": "c", "effect": "e", "quote": "задача — 4 балла"},
+            {"condition": "c", "effect": "e", "quote": "штраф за опоздание"},
+        ]
+    }
+    s = score_case("grading_rules", pred, gold)
+    assert (s.tp, s.fp, s.fn) == (1, 1, 0)  # лишней считается только выдумка

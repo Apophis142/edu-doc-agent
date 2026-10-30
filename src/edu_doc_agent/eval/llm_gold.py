@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from edu_doc_agent.extraction.llm_extract import (
     TASKS_BY_NAME,
     normalize,
+    postprocess,
     quote_in_text,
     run_task,
 )
@@ -25,6 +26,9 @@ _FIXTURES = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
 DEFAULT_GOLD = _FIXTURES / "llm_gold.json"  # на ней настраивались промпты
 HOLDOUT = _FIXTURES / "llm_holdout.json"  # вторая порция: по ней уже правили промпты и правила
 BLIND = _FIXTURES / "llm_blind.json"  # третья порция: размечена до запуска, не настраивается
+BLIND2 = (
+    _FIXTURES / "llm_blind2.json"
+)  # четвёртая: после правок разделов и таблиц, ничего не правим
 
 # ориентиры из ADR-0002: текстовые поля >= 0.8
 THRESHOLDS = {"prerequisites": 0.8, "active_forms": 0.8, "grading_rules": 0.8}
@@ -66,17 +70,46 @@ def _key(task: str, item: dict) -> tuple:
     return (normalize(item["quote"]).strip(" .,;:"),)
 
 
+_STOP = {"и", "в", "на", "с", "по", "о", "об", "из", "при", "для", "к", "а"}
+
+
+def _words(stem: str) -> set[str]:
+    return {w for w in stem.split() if w not in _STOP}
+
+
 def _match(task: str, pred: dict[tuple, dict], gold: dict[tuple, dict]) -> list[tuple]:
-    """Пары ключей (предсказание, эталон). Правила оценивания сопоставляются по цитате, одна из
-    которых содержит другую: модель то захватывает точку, то нет."""
-    if task != "grading_rules":
-        return [(k, k) for k in pred.keys() & gold.keys()]
-    pairs = []
-    for pk in pred:
-        gk = next((g for g in gold if pk[0] in g[0] or g[0] in pk[0]), None)
+    """Пары ключей (предсказание, эталон), каждый ключ участвует не более чем в одной паре.
+
+    Сначала точные совпадения. Правила оценивания дальше сопоставляются по цитате, одна из
+    которых содержит другую: модель то захватывает точку, то нет. Пререквизиты — по словам:
+    название эталона целиком входит в название ответа или наоборот («разработка простых
+    программ» и «разработка простых программ на распространённых языках»). Так формулировка
+    не считается ошибкой, а склейка двух названий в одно всё равно оставляет второе пропущенным.
+    """
+    pairs = [(k, k) for k in pred.keys() & gold.keys()]
+    free_pred = [k for k in pred if k not in gold]
+    free_gold = [k for k in gold if k not in pred]
+    for pk in free_pred:
+        gk = next((g for g in free_gold if _similar(task, pk, g, pred[pk], gold[g])), None)
         if gk is not None:
             pairs.append((pk, gk))
+            free_gold.remove(gk)
     return pairs
+
+
+def _similar(task: str, a: tuple, b: tuple, item_a: dict, item_b: dict) -> bool:
+    if task == "grading_rules":
+        return a[0] in b[0] or b[0] in a[0]
+    if task == "prerequisites":
+        wa, wb = _words(a[0]), _words(b[0])
+        return bool(wa and wb) and (wa <= wb or wb <= wa)
+    # активные формы: часы те же, а название или цитата одной записи содержится в другой
+    # («консультации по проекту» и «консультации»; группа «интерактивные методы» и её части)
+    if a[1] != b[1]:
+        return False
+    wa, wb = _words(a[0]), _words(b[0])
+    qa, qb = normalize(item_a["quote"]), normalize(item_b["quote"])
+    return bool(wa and wb and (wa <= wb or wb <= wa)) or (a[1] is None and (qa in qb or qb in qa))
 
 
 @dataclass
@@ -114,9 +147,13 @@ def score_case(task: str, predicted: dict, expected: dict) -> Score:
     pred = {_key(task, i): i for i in predicted.get(field_name, [])}
     gold = {_key(task, i): i for i in expected.get(field_name, [])}
     pairs = _match(task, pred, gold)
+    unmatched = [k for k in pred if k not in {p for p, _ in pairs}]
+    if task == "grading_rules":
+        # правило, вырезанное из предложения эталона, — тот же факт в более мелком виде, не ложный
+        unmatched = [k for k in unmatched if not any(k[0] in g[0] for g in gold)]
     score = Score(
         tp=len({g for _, g in pairs}),
-        fp=len(pred) - len({p for p, _ in pairs}),
+        fp=len(unmatched),
         fn=len(gold) - len({g for _, g in pairs}),
     )
     for pk, gk in pairs:
@@ -156,6 +193,8 @@ def evaluate(client: LLMClient, cases: list[GoldCase] | None = None) -> Report:
     report = Report()
     for case in cases or load_gold():
         output, problem = run_task(TASKS_BY_NAME[case.task], case.text, client)
+        if output is not None:
+            output = postprocess(output)
         if output is None:
             report.failures[case.id] = problem or "нет ответа"
             report.by_task[case.task].fn += len(case.expected[_ITEMS[case.task]])
