@@ -301,7 +301,7 @@ def _check_topic_hours(
 
 
 def _attestation_name(header: str) -> str:
-    m = re.search(r"при проведении\s+(.+)$", header.lower())
+    m = re.search(r"(?:при проведении|за)\s+(.+)$", header.lower())
     name = (m.group(1) if m else header.lower()).replace("ё", "е").strip()
     if name.startswith("зач"):
         return "зачёт с оценкой" if "оценк" in name else "зачёт"
@@ -313,11 +313,17 @@ def _extract_grade_scale(table: MdTable, file: str, result: RPDExtraction) -> No
         return
     low = [_one_line(clean_text(c)).lower() for c in table.rows[0]]
     ects = next((j for j, c in enumerate(low) if "ects" in c), None)
-    grade = next((j for j, c in enumerate(low) if c.startswith("оценка спбгу")), None)
+    # столбец оценки: «Оценка СПбГУ», «Оценка при проведении зачёта», «Оценка за экзамен»
+    grade = next((j for j, c in enumerate(low) if c.startswith("оценка") and "ects" not in c), None)
     if ects is None or grade is None:
         return
     attestation = _attestation_name(low[grade])
-    criteria = len(low) - 1
+    # критерий — последний столбец, а если последний занят оценкой, то первый из остальных
+    # («Процент выполнения задач | Оценка ECTS | Оценка при проведении зачёта»)
+    rest = [j for j in range(len(low)) if j not in (ects, grade)]
+    if not rest:
+        return
+    criteria = rest[-1] if rest[-1] > grade else rest[0]
     for idx, row in enumerate(table.rows[1:], start=1):
         if len(row) <= max(ects, grade, criteria):
             continue

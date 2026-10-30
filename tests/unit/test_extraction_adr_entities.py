@@ -374,3 +374,25 @@ def test_merged_cells_table_with_extra_columns(tmp_path: Path) -> None:
 def test_active_forms_phrasings_from_real_documents(line: str, expected: list[int]) -> None:
     text = f"## 1.4. Перечень активных и интерактивных форм учебных занятий\n\n{line}\n"
     assert [f.hours for f in extract_rpd(text, "x.md").active_forms] == expected
+
+
+def test_grade_scale_with_criterion_first_and_grade_last() -> None:
+    """Раскладка «Критерий | Оценка ECTS | Оценка за экзамен/при проведении зачёта»."""
+    md = (
+        "## 3.1.3. Методика\n\n"
+        "| Процент выполнения | Оценка ECTS | Оценка при проведении зачёта |\n"
+        "| --- | --- | --- |\n"
+        "| от 90% до 100% | A | зачтено |\n"
+        "| менее 50% | F | не зачтено |\n\n"
+        "| Итоговое количество баллов | Оценка ECTS | Оценка за экзамен |\n"
+        "| --- | --- | --- |\n"
+        "| 9–10 | A | отлично |\n"
+        "| менее 5 | F | неудовлетворительно |\n"
+    )
+    scales = extract_rpd(md, file="synthetic.md").grade_scales
+    assert [(r.attestation, r.grade, r.ects, r.criteria) for r in scales] == [
+        ("зачёт", "зачтено", "A", "от 90% до 100%"),
+        ("зачёт", "не зачтено", "F", "менее 50%"),
+        ("экзамен", "отлично", "A", "9-10"),
+        ("экзамен", "неудовлетворительно", "F", "менее 5"),
+    ]
