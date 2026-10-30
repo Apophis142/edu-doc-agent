@@ -115,13 +115,22 @@ def extract_rpd(text: str, file: str, llm: LLMClient | None = None) -> RPDExtrac
 
 
 def _cross_check_llm(result: RPDExtraction) -> None:
-    """Расхождения между LLM и правилами: повод для ручной проверки, а не для исправления."""
+    """Расхождения между LLM и правилами: повод для ручной проверки, а не для исправления.
+
+    Если общий объём в 1.4 не назван, сравнивается сумма часов форм, но только когда часы
+    есть у каждой формы: иначе сумма неполная и расхождение было бы ложным.
+    """
     assert result.llm is not None
+    forms = result.llm.active_forms
     stated = result.llm.active_total_hours
+    label = "объём активных форм в 1.4"
+    if stated is None and forms and all(f.hours is not None for f in forms):
+        stated = sum(f.hours or 0 for f in forms)
+        label = "сумма часов активных форм в 1.4"
     table = {w.active_hours for w in result.workload_table if not w.is_total and w.active_hours}
     if stated is not None and table and stated not in table:
         result.warnings.append(
-            f"LLM: объём активных форм в 1.4 ({stated:g} ч) не совпадает с таблицей 2.1 "
+            f"LLM: {label} ({stated:g} ч) не совпадает с таблицей 2.1 "
             f"({', '.join(f'{h:g}' for h in sorted(table))})"
         )
 

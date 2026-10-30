@@ -18,6 +18,8 @@ class MdSection:
     heading: str
     text: str  # тело раздела без таблиц; номера строк совпадают с исходным файлом
     line: int  # 1-based номер строки заголовка
+    level: int = 0  # число «#» в заголовке
+    full_text: str = ""  # то же, но строки таблиц развёрнуты в текст «ячейка | ячейка»
 
 
 @dataclass
@@ -82,20 +84,33 @@ def parse_tables(text: str) -> list[MdTable]:
     return tables
 
 
+def table_row_text(line: str) -> str:
+    """Строка таблицы как обычный текст: ячейки через « | », без пустых и подряд повторённых
+    (так объединённая ячейка попадает в md несколько раз). Разделитель шапки даёт пустую строку."""
+    cells = split_row(line)
+    if _is_separator(cells):
+        return ""
+    texts = [" ".join(clean_text(c).split()) for c in cells]
+    kept = [c for i, c in enumerate(texts) if c and (i == 0 or c != texts[i - 1])]
+    return " | ".join(kept)
+
+
 def split_sections(text: str) -> list[MdSection]:
-    """Делит md на разделы по заголовкам; строки таблиц в теле заменяются пустыми.
+    """Делит md на разделы по заголовкам; строки таблиц в `text` заменяются пустыми.
 
     Пустые строки сохраняют нумерацию: смещение в `MdSection.text` легко перевести
     в номер строки исходного файла (`line + text.count("\\n", 0, offset) + 1`).
+    В `full_text` таблицы развёрнуты в текст, строк по-прежнему столько же.
     """
     sections: list[MdSection] = []
-    current: tuple[str, int] | None = None
+    current: tuple[str, int, int] | None = None
     body: list[str] = []
+    full: list[str] = []
 
     def flush() -> None:
         if current is None:
             return
-        heading, line = current
+        heading, line, level = current
         m = _SECTION_NUMBER_RE.match(heading)
         sections.append(
             MdSection(
@@ -103,6 +118,8 @@ def split_sections(text: str) -> list[MdSection]:
                 heading=heading,
                 text="\n".join(body),
                 line=line,
+                level=level,
+                full_text="\n".join(full),
             )
         )
 
@@ -110,8 +127,13 @@ def split_sections(text: str) -> list[MdSection]:
         m = _HEADING_RE.match(line)
         if m:
             flush()
-            current, body = (clean_text(m.group(2)), lineno), []
+            current, body, full = (clean_text(m.group(2)), lineno, len(m.group(1))), [], []
         elif current is not None:
-            body.append("" if line.lstrip().startswith("|") else clean_text(line))
+            if line.lstrip().startswith("|"):
+                body.append("")
+                full.append(table_row_text(line))
+            else:
+                body.append(clean_text(line))
+                full.append(body[-1])
     flush()
     return sections

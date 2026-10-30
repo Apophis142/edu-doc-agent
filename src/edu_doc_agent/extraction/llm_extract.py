@@ -14,6 +14,7 @@ from pydantic import BaseModel, ValidationError
 
 from edu_doc_agent.extraction import llm_prompts as prompts
 from edu_doc_agent.extraction.llm_schemas import (
+    ActiveFormItem,
     ActiveFormsOutput,
     GradingRulesOutput,
     LLMActiveForm,
@@ -34,31 +35,64 @@ class LLMTask:
     name: str
     prompt: str
     output: type[BaseModel]
-    in_section: Callable[[MdSection], bool]
+    select: Callable[[list[MdSection]], list[MdSection]]  # разделы документа для одного вызова
+    with_tables: bool = False  # подавать таблицы разделов модели как текст
 
 
-def _number(section: MdSection) -> str:
-    return section.number or ""
+_SECTION_END_RE = re.compile(r"^(раздел|приложение)\b")
+_GRADING_SUB_RE = re.compile(r"методик|критери")
+
+
+def select_prerequisites(sections: list[MdSection]) -> list[MdSection]:
+    """РПД: «1.2. Требования к подготовленности…»; у практик тот же раздел лежит под номером 1.5,
+    поэтому ищем по заголовку, а номер 1.2 — запасной вариант."""
+    hits = [s for s in sections if "подготовленност" in s.heading.lower()]
+    return hits or [s for s in sections if s.number == "1.2"]
+
+
+def select_active_forms(sections: list[MdSection]) -> list[MdSection]:
+    """«1.4. Перечень активных и интерактивных форм…». У практик такого раздела нет."""
+    return [
+        s
+        for s in sections
+        if "активн" in s.heading.lower() and (s.number is None or s.number.startswith("1."))
+    ]
+
+
+def select_grading(sections: list[MdSection]) -> list[MdSection]:
+    """«3.1.3. Методика … и критерии оценивания» вместе с вложенными разделами.
+
+    В РПД критерии часто идут безномерными заголовками того же уровня сразу после 3.1.3
+    («Критерии выставления оценок за экзамен», «Таблица. Критерии оценивания…»), поэтому
+    раздел продолжается до следующего пронумерованного заголовка. У практик 3.1.3 только
+    объединяет подразделы: берём «Методика…» и «Критерии…», но не форму отчёта и ФОС.
+    """
+    picked: list[MdSection] = []
+    inside = False
+    for s in sections:
+        if s.number is None:
+            if _SECTION_END_RE.match(s.heading.lower()):
+                inside = False
+        elif s.number == "3.1.3":
+            inside = True
+        elif s.number.startswith("3.1.3."):
+            inside = bool(_GRADING_SUB_RE.search(s.heading.lower()))
+        else:
+            inside = False
+        if inside:
+            picked.append(s)
+    return picked
 
 
 TASKS = [
-    LLMTask(
-        "prerequisites",
-        prompts.PREREQUISITES,
-        PrerequisitesOutput,
-        lambda s: _number(s) == "1.2",
-    ),
-    LLMTask(
-        "active_forms",
-        prompts.ACTIVE_FORMS,
-        ActiveFormsOutput,
-        lambda s: _number(s) == "1.4" and "активн" in s.heading.lower(),
-    ),
+    LLMTask("prerequisites", prompts.PREREQUISITES, PrerequisitesOutput, select_prerequisites),
+    LLMTask("active_forms", prompts.ACTIVE_FORMS, ActiveFormsOutput, select_active_forms),
     LLMTask(
         "grading_rules",
         prompts.GRADING_RULES,
         GradingRulesOutput,
-        lambda s: _number(s).startswith("3.1.3"),
+        select_grading,
+        with_tables=True,
     ),
 ]
 TASKS_BY_NAME = {t.name: t for t in TASKS}
@@ -114,32 +148,104 @@ def _verified(items: list, text: str, task: str, warnings: list[str]) -> list:
     return kept
 
 
+def postprocess(output: BaseModel) -> BaseModel:
+    """Детерминированная чистка ответа модели: то, что промпт гарантировать не может."""
+    if isinstance(output, ActiveFormsOutput):
+        return output.model_copy(update={"items": _merge_forms(output.items)})
+    if isinstance(output, PrerequisitesOutput):
+        seen: set[str] = set()
+        items = []
+        for item in output.items:
+            if (key := normalize(item.name)) not in seen:
+                seen.add(key)
+                items.append(item)
+        return output.model_copy(update={"items": items})
+    return output
+
+
+def _merge_forms(items: list[ActiveFormItem]) -> list[ActiveFormItem]:
+    """Вид занятий в нижнем регистре; одна цитата с теми же часами — одна запись.
+
+    «Практические и лабораторные занятия (24 часа)» модель иногда делит на два элемента по
+    24 часа, и сумма часов получается вдвое больше.
+    """
+    merged: list[ActiveFormItem] = []
+    for item in items:
+        item = item.model_copy(update={"kind": item.kind.strip().lower()})
+        twin = next(
+            (
+                m
+                for m in merged
+                if item.hours is not None
+                and m.hours == item.hours
+                and normalize(m.quote) == normalize(item.quote)
+            ),
+            None,
+        )
+        if twin is None:
+            merged.append(item)
+        elif item.kind not in twin.kind:
+            twin.kind = f"{twin.kind} и {item.kind}"
+    return merged
+
+
+def section_text(sections: list[MdSection], with_tables: bool) -> str:
+    """Текст для одного вызова. Заголовки безномерных подразделов остаются: по ним видно, к чему
+    относится следующий кусок (например, «Критерии оценивания заданий контрольной работы»)."""
+    parts = []
+    for i, s in enumerate(sections):
+        lines = (s.full_text if with_tables else s.text).split("\n")
+        body = [ln for ln in lines if ln.strip()]
+        if body and i > 0 and s.number is None:
+            body.insert(0, s.heading)
+        parts += body
+    return "\n".join(parts)
+
+
+def _locate(quote: str, sections: list[MdSection], file: str, with_tables: bool) -> SourceRef:
+    """Раздел, в котором нашлась цитата (по умолчанию — первый раздел задачи)."""
+    for s in sections:
+        if quote_in_text(quote, s.full_text if with_tables else s.text):
+            return SourceRef(file=file, section=s.heading, line=s.line)
+    first = sections[0]
+    return SourceRef(file=file, section=first.heading, line=first.line)
+
+
 def extract_with_llm(
     md: str, file: str, client: LLMClient, tasks: list[str] | None = None
 ) -> LLMExtraction:
-    """Прогоняет выбранные задачи (по умолчанию все) по разделам md-документа."""
+    """Прогоняет выбранные задачи (по умолчанию все): один вызов на задачу и документ."""
     result = LLMExtraction(file=file)
     sections = split_sections(md)
     for task in (TASKS_BY_NAME[n] for n in tasks) if tasks else TASKS:
-        for section in (s for s in sections if task.in_section(s)):
-            text = "\n".join(ln for ln in section.text.split("\n") if ln.strip())
-            if not text:
-                continue
-            ref = SourceRef(file=file, section=section.heading, line=section.line)
-            output, problem = run_task(task, text, client)
-            if output is None:
-                result.warnings.append(f"{problem} [{section.heading[:40]}]")
-                continue
-            _collect(task.name, output, text, ref, result)
+        picked = task.select(sections)
+        text = section_text(picked, task.with_tables) if picked else ""
+        if not text:
+            continue
+        output, problem = run_task(task, text, client)
+        if output is None:
+            result.warnings.append(f"{problem} [{picked[0].heading[:40]}]")
+            continue
+        _collect(task, postprocess(output), text, picked, file, result)
     return result
 
 
 def _collect(
-    name: str, output: BaseModel, text: str, ref: SourceRef, result: LLMExtraction
+    task: LLMTask,
+    output: BaseModel,
+    text: str,
+    sections: list[MdSection],
+    file: str,
+    result: LLMExtraction,
 ) -> None:
+    name = task.name
+
+    def source(item: BaseModel) -> SourceRef:
+        return _locate(item.quote, sections, file, task.with_tables)
+
     if isinstance(output, PrerequisitesOutput):
         for item in _verified(output.items, text, name, result.warnings):
-            result.prerequisites.append(LLMPrerequisite(**item.model_dump(), source=ref))
+            result.prerequisites.append(LLMPrerequisite(**item.model_dump(), source=source(item)))
     elif isinstance(output, ActiveFormsOutput):
         if output.total_hours is not None and re.search(
             rf"\b{output.total_hours:g}\b", text.replace(",", ".")
@@ -150,7 +256,7 @@ def _collect(
                 f"{name}: общий объём {output.total_hours:g} ч не найден в тексте"
             )
         for item in _verified(output.items, text, name, result.warnings):
-            result.active_forms.append(LLMActiveForm(**item.model_dump(), source=ref))
+            result.active_forms.append(LLMActiveForm(**item.model_dump(), source=source(item)))
     elif isinstance(output, GradingRulesOutput):
         for item in _verified(output.rules, text, name, result.warnings):
-            result.grading_rules.append(LLMGradingRule(**item.model_dump(), source=ref))
+            result.grading_rules.append(LLMGradingRule(**item.model_dump(), source=source(item)))
