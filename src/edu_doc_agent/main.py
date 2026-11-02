@@ -39,6 +39,7 @@ app = FastAPI(
         "формирования и проверки учебно-методических документов образовательной программы."
     ),
     version=__version__,
+    lifespan=lifespan,
 )
 
 app.include_router(sessions_router)
