@@ -1,6 +1,7 @@
 """Общие фикстуры и настройки pytest для всего проекта."""
 
 from collections.abc import Iterator
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -50,5 +51,9 @@ def pytest_collection_modifyitems(
 @pytest.fixture
 def client() -> Iterator[TestClient]:
     """HTTP-клиент к FastAPI-приложению для юнит-тестов API."""
+    mock_redis = AsyncMock()
+
+    app.state.redis_pool = mock_redis
+
     with TestClient(app) as test_client:
         yield test_client
