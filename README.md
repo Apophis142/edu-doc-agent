@@ -25,13 +25,16 @@ uv run pre-commit install
 
 # 2. Окружение
 cp .env.example .env       # заполнить LLM_API_KEY, DATA_DIR
+# Убедитесь, что для локального запуска REDIS_URL=redis://127.0.0.1:6379/0
+# (при запуске полностью в Docker используется redis://redis:6379/0)
 
-# 3. База данных (только она — в Docker)
-docker compose up -d db
+# 3. Инфраструктура (БД и Redis в Docker)
+docker compose up -d db redis
 
-# 4. API и UI локально
-make run-api   # http://localhost:8000/docs
-make run-ui    # http://localhost:8501
+# 4. API, Воркер и UI локально (запускать в разных окнах терминала)
+make run-api     # API: http://localhost:8000/docs
+make run-worker  # Фоновый воркер ARQ для обработки задач
+make run-ui      # UI: http://localhost:8501
 ```
 Полностью в Docker (как будет на демо):
 ```bash
