@@ -151,7 +151,7 @@ PREREQUISITE_GROUPS: dict[str, list] = {
     "область знаний": [
         rule(_KNOWLEDGE_WORD, _IN_AREA, _AREA_LIST),
         # «Знание основ комбинаторного анализа, математического анализа.» — без «по»
-        rule(normalized("знание"), _BARE_AREA_LIST),
+        rule(or_(normalized("знание"), normalized("навык")), _BARE_AREA_LIST),
     ],
 }
 
@@ -270,14 +270,20 @@ def _lines(section: MdSection) -> list[tuple[int, str]]:
     return [(section.line + 1 + i, line) for i, line in enumerate(section.text.split("\n")) if line]
 
 
+def _under(number: str | None, prefix: str) -> bool:
+    """Номер раздела равен `prefix` или вложен в него: «3.1.3.2» в «3.1.3», но «3.10» не в «3.1»."""
+    parts, head = (number or "").split("."), prefix.split(".")
+    return parts[: len(head)] == head
+
+
 def _is_control_section(section: MdSection) -> bool:
-    number = section.number or ""
-    if number.startswith("3.1.4"):  # примеры КИМ — не описание контроля
+    number = section.number
+    if _under(number, "3.1.4"):  # примеры КИМ — не описание контроля
         return False
-    if number.startswith("3.1.3"):
+    if _under(number, "3.1.3"):
         return True
     heading = section.heading.casefold()
-    return number.startswith("3.1") and ("контрол" in heading or "аттестац" in heading)
+    return _under(number, "3.1") and ("контрол" in heading or "аттестац" in heading)
 
 
 def _is_checked(line: str, position: int) -> bool:
@@ -300,6 +306,20 @@ def extract_free_text(text: str, file: str, result: RPDExtraction) -> None:
     _extract_workload_and_semesters(sections, parsers, file, result)
 
 
+def _with_parenthetical(name: str, line: str) -> str:
+    """Скобки — стоп-токен правил, но уточнение «(С, С++, Java)» принадлежит названию."""
+    idx = line.find(name)
+    if idx >= 0 and (m := re.match(r"\s*(\([^()]*\))", line[idx + len(name) :])):
+        return f"{name} {m.group(1)}"
+    return name
+
+
+def _is_prerequisite_section(section: MdSection, sections: list[MdSection]) -> bool:
+    if any("подготовленност" in s.heading.casefold() for s in sections):
+        return "подготовленност" in section.heading.casefold()
+    return section.number == "1.2"
+
+
 def _extract_prerequisites(
     sections: list[MdSection],
     parsers: dict[str, Parser],
@@ -309,7 +329,8 @@ def _extract_prerequisites(
 ) -> None:
     seen: set[str] = set()
     for section in sections:
-        if section.number != "1.2":
+        # у практик (РПП) пререквизиты лежат в другом разделе, поэтому сначала ищем по заголовку
+        if not _is_prerequisite_section(section, sections):
             continue
         for lineno, raw_line in _lines(section):
             # в части документов названия в прямых кавычках: "Основы программирования"
@@ -317,7 +338,7 @@ def _extract_prerequisites(
             for kind in PREREQUISITE_GROUPS:
                 for match in parsers[f"prereq:{kind}"].findall(line):
                     for raw in _as_list(match.fact.names):
-                        name = _detokenize(raw)
+                        name = _with_parenthetical(_detokenize(raw), line)
                         key = name.casefold()
                         if len(name) < _MIN_NAME_LEN or key in seen or key == title:
                             continue
@@ -365,7 +386,7 @@ def _extract_workload_and_semesters(
     loads: dict[tuple, Workload] = {}
     semesters: set[int] = set()
     for section in sections:
-        if not (section.number or "").startswith("2.1"):
+        if not _under(section.number, "2.1"):
             continue
         for lineno, line in _lines(section):
             for match in parsers["load"].findall(line):

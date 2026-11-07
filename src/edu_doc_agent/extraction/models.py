@@ -1,7 +1,9 @@
 """Pydantic-модели результата извлечения из РПД.
 
-Каждая сущность хранит `source` — откуда она взята (файл, раздел, строка),
-чтобы в протоколе проверки можно было сослаться на источник.
+Каждая сущность-запись (компетенция, индикатор, строка таблицы, пререквизит и т. д.) хранит
+`source` — откуда она взята (файл, раздел, строка), чтобы в протоколе проверки можно было
+сослаться на источник. Исключение: скалярные поля верхнего уровня `RPDExtraction` (титул,
+рег. номер, код, язык, з.е., цели) берутся из фиксированных мест документа и источника не имеют.
 """
 
 from typing import Any, Literal
@@ -17,6 +19,12 @@ DocKind = Literal["discipline", "practice"]
 
 class _Model(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    @classmethod
+    def model_json_schema(cls, *args: Any, mode: Any = "serialization", **kwargs: Any) -> dict:
+        """Схема по умолчанию описывает то, что отдаёт `model_dump()`: с вычисляемыми полями
+        (`total_hours`, `competence_code`), иначе `additionalProperties: false` отвергает JSON."""
+        return super().model_json_schema(*args, mode=mode, **kwargs)
 
 
 class Competence(_Model):

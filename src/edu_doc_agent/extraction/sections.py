@@ -308,13 +308,22 @@ def _attestation_name(header: str) -> str:
     return "экзамен" if name.startswith("экзамен") else name
 
 
+_SCORE_COLUMN_RE = re.compile(r"балл|процент|100|шкал")
+
+
 def _extract_grade_scale(table: MdTable, file: str, result: RPDExtraction) -> None:
     if not table.rows:
         return
     low = [_one_line(clean_text(c)).lower() for c in table.rows[0]]
     ects = next((j for j, c in enumerate(low) if "ects" in c), None)
     # столбец оценки: «Оценка СПбГУ», «Оценка при проведении зачёта», «Оценка за экзамен»
-    grade = next((j for j, c in enumerate(low) if c.startswith("оценка") and "ects" not in c), None)
+    # столбцов «Оценка …» может быть несколько: «Оценка по 100-балльной шкале» — это критерий,
+    # а оценкой считаем «Оценка СПбГУ при проведении зачёта»
+    marks = [j for j, c in enumerate(low) if c.startswith("оценка") and "ects" not in c]
+    grade = next(
+        (j for j in marks if re.search(r"спбгу|при проведении|за (?:экзамен|зач)", low[j])),
+        next((j for j in marks if not _SCORE_COLUMN_RE.search(low[j])), None),
+    )
     if ects is None or grade is None:
         return
     attestation = _attestation_name(low[grade])
@@ -323,7 +332,8 @@ def _extract_grade_scale(table: MdTable, file: str, result: RPDExtraction) -> No
     rest = [j for j in range(len(low)) if j not in (ects, grade)]
     if not rest:
         return
-    criteria = rest[-1] if rest[-1] > grade else rest[0]
+    scored = [j for j in rest if _SCORE_COLUMN_RE.search(low[j])]
+    criteria = scored[0] if scored else rest[-1] if rest[-1] > grade else rest[0]
     for idx, row in enumerate(table.rows[1:], start=1):
         if len(row) <= max(ects, grade, criteria):
             continue
@@ -444,6 +454,7 @@ def _extract_program(text: str, tables: list[MdTable], file: str, result: RPDExt
         info.source = SourceRef(file=file, line=text.count("\n", 0, m.start()) + 1)
     if m := _PROGRAM_RE.search(text):
         info.program = m.group(1)
+        info.source = info.source or SourceRef(file=file, line=text.count("\n", 0, m.start()) + 1)
     for table in tables:
         for row in table.rows:
             first = _one_line(clean_text(row[0])) if row else ""
@@ -451,6 +462,12 @@ def _extract_program(text: str, tables: list[MdTable], file: str, result: RPDExt
                 profile = pm.group(1).strip("«» ")
                 if profile not in info.profiles:
                     info.profiles.append(profile)
+                if info.source is None:
+                    info.source = SourceRef(
+                        file=file,
+                        section=table.section,
+                        line=table.row_lines[table.rows.index(row)],
+                    )
     if info.direction_code or info.program or info.profiles:
         result.program = info
 

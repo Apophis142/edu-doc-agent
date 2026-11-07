@@ -20,7 +20,7 @@ import re
 from pathlib import Path
 
 from edu_doc_agent.extraction.freetext import extract_free_text
-from edu_doc_agent.extraction.llm_extract import extract_with_llm
+from edu_doc_agent.extraction.llm_extract import extract_with_llm, normalize
 from edu_doc_agent.extraction.md_utils import MdTable, clean_text, parse_tables
 from edu_doc_agent.extraction.models import (
     AssessmentLink,
@@ -95,6 +95,7 @@ def extract_rpd(text: str, file: str, llm: LLMClient | None = None) -> RPDExtrac
     check_workload(result)
     extract_free_text(text, file, result)
     extract_sections(text, tables, file, result)
+    _check_active_forms(result)
 
     for comp in result.competences:
         if not comp.name:
@@ -114,8 +115,29 @@ def extract_rpd(text: str, file: str, llm: LLMClient | None = None) -> RPDExtrac
     return result
 
 
+def _check_active_forms(result: RPDExtraction) -> None:
+    """Объём активных форм из 1.4 против столбца активных часов таблицы 2.1."""
+    stated = next((f.hours for f in result.active_forms if f.is_total and f.hours), None)
+    if stated is None and result.active_forms and all(f.hours for f in result.active_forms):
+        stated = sum(f.hours or 0 for f in result.active_forms)
+    rows = [w for w in result.workload_table if not w.is_total and w.active_hours]
+    if stated is None or not rows:
+        return
+    table = sorted({w.active_hours or 0 for w in rows})
+    if stated not in table and abs(sum(table) - stated) > 1e-6:
+        result.warnings.append(
+            f"объём активных форм в 1.4 ({stated:g} ч) не совпадает с таблицей 2.1 "
+            f"({', '.join(f'{h:g}' for h in table)})"
+        )
+
+
+def _prereq_keys(names: list[str]) -> set[str]:
+    return {normalize(n) for n in names}
+
+
 def _cross_check_llm(result: RPDExtraction) -> None:
-    """Расхождения между LLM и правилами: повод для ручной проверки, а не для исправления.
+    """Расхождения между LLM и правилами (часы активных форм, пререквизиты): повод для ручной
+    проверки, а не для исправления.
 
     Если общий объём в 1.4 не назван, сравнивается сумма часов форм, но только когда часы
     есть у каждой формы: иначе сумма неполная и расхождение было бы ложным.
@@ -132,6 +154,17 @@ def _cross_check_llm(result: RPDExtraction) -> None:
         result.warnings.append(
             f"LLM: {label} ({stated:g} ч) не совпадает с таблицей 2.1 "
             f"({', '.join(f'{h:g}' for h in sorted(table))})"
+        )
+    # пререквизиты: названия, которых нет у второй стороны, отправляем на ручную проверку
+    rule_keys = _prereq_keys([p.name for p in result.prerequisites])
+    llm_keys = _prereq_keys([p.name for p in result.llm.prerequisites])
+    if rule_keys and llm_keys and rule_keys != llm_keys:
+        only_rules = sorted(rule_keys - llm_keys)
+        only_llm = sorted(llm_keys - rule_keys)
+        result.warnings.append(
+            "LLM: пререквизиты расходятся с правилами, нужна ручная проверка"
+            + (f"; только правила: {', '.join(only_rules)}" if only_rules else "")
+            + (f"; только LLM: {', '.join(only_llm)}" if only_llm else "")
         )
 
 

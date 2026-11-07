@@ -203,8 +203,24 @@ def _build_row(
     return out
 
 
+def _where(row: WorkloadRow) -> str:
+    """Траектория, форма и строка md: иначе предупреждения разных траекторий неразличимы."""
+    parts = [p for p in (row.trajectory, row.study_form) if p]
+    if row.source.line is not None:
+        parts.append(f"строка {row.source.line}")
+    return f" [{', '.join(parts)}]" if parts else ""
+
+
+def _kind_sums(rows: list[WorkloadRow]) -> dict[str, float]:
+    sums: dict[str, float] = {}
+    for r in rows:
+        for kind, hours in r.contact_hours.items():
+            sums[kind] = sums.get(kind, 0) + hours
+    return sums
+
+
 def check_workload(result: RPDExtraction) -> None:
-    """Сверка часов с зачётными единицами и ИТОГО с семестрами.
+    """Сверка часов с з.е. и ИТОГО с семестрами, в том числе по видам контактной работы.
 
     Расхождения идут в `warnings` и не правятся: чаще всего ошибка в самом документе
     (в ИТОГО пропущен столбец или опечатка в часах).
@@ -214,7 +230,7 @@ def check_workload(result: RPDExtraction) -> None:
         label = "ИТОГО" if row.is_total else f"семестр {row.semester}"
         if row.credits is not None and row.total_hours != row.credits * HOURS_PER_CREDIT:
             result.warnings.append(
-                f"трудоёмкость, {label}: {row.total_hours:g} ч не равно "
+                f"трудоёмкость, {label}{_where(row)}: {row.total_hours:g} ч не равно "
                 f"{row.credits:g} з.е. × {HOURS_PER_CREDIT}"
             )
         if not row.is_total:
@@ -224,7 +240,15 @@ def check_workload(result: RPDExtraction) -> None:
             credits = sum(r.credits or 0 for r in block)
             if abs(credits - row.credits) > _EPS:
                 result.warnings.append(
-                    f"трудоёмкость: з.е. по семестрам ({credits:g}) не равны ИТОГО "
+                    f"трудоёмкость{_where(row)}: з.е. по семестрам ({credits:g}) не равны ИТОГО "
                     f"({row.credits:g})"
                 )
+        if block:
+            sums = _kind_sums(block)
+            for kind, total in _kind_sums([row]).items():
+                if kind in sums and abs(sums[kind] - total) > _EPS:
+                    result.warnings.append(
+                        f"трудоёмкость{_where(row)}: {kind} по семестрам ({sums[kind]:g} ч) "
+                        f"не равны ИТОГО ({total:g} ч)"
+                    )
         block = []

@@ -25,7 +25,7 @@ from edu_doc_agent.extraction.llm_schemas import (
 )
 from edu_doc_agent.extraction.md_utils import MdSection, clean_text, split_sections
 from edu_doc_agent.extraction.source import SourceRef
-from edu_doc_agent.llm import LLMClient
+from edu_doc_agent.llm import LLMClient, LLMError
 
 MAX_RETRIES = 2  # повторов после первого ответа, как в ADR-0002
 
@@ -111,11 +111,17 @@ _ELLIPSIS_RE = re.compile(r"\.{3}|…")
 
 def quote_in_text(quote: str, text: str) -> bool:
     """Цитата должна быть подстрокой текста. Многоточие внутри разрешено: модель так сокращает
-    длинные места, поэтому каждый кусок между многоточиями проверяется отдельно."""
+    длинные места, поэтому куски между многоточиями ищутся по порядку, каждый правее предыдущего."""
     parts = [normalize(p).strip(" .,;:") for p in _ELLIPSIS_RE.split(quote)]
     parts = [p for p in parts if p]
     haystack = normalize(text)
-    return bool(parts) and all(p in haystack for p in parts)
+    pos = 0
+    for part in parts:
+        found = haystack.find(part, pos)
+        if found < 0:
+            return False
+        pos = found + len(part)
+    return bool(parts)
 
 
 def run_task(task: LLMTask, text: str, client: LLMClient) -> tuple[BaseModel | None, str | None]:
@@ -210,12 +216,26 @@ def section_text(sections: list[MdSection], with_tables: bool) -> str:
 
 
 def _locate(quote: str, sections: list[MdSection], file: str, with_tables: bool) -> SourceRef:
-    """Раздел, в котором нашлась цитата (по умолчанию — первый раздел задачи)."""
+    """Раздел и строка md, где нашлась цитата (по умолчанию — заголовок первого раздела задачи).
+
+    Строки `text`/`full_text` соответствуют строкам файла один к одному, начиная со строки
+    после заголовка."""
     for s in sections:
-        if quote_in_text(quote, s.full_text if with_tables else s.text):
-            return SourceRef(file=file, section=s.heading, line=s.line)
+        body = s.full_text if with_tables else s.text
+        if quote_in_text(quote, body):
+            return SourceRef(file=file, section=s.heading, line=_quote_line(quote, s, body))
     first = sections[0]
     return SourceRef(file=file, section=first.heading, line=first.line)
+
+
+def _quote_line(quote: str, section: MdSection, body: str) -> int:
+    """Строка, на которой цитата начинается (по первым словам; не нашли — заголовок раздела)."""
+    parts = (normalize(p).strip(" .,;:") for p in _ELLIPSIS_RE.split(quote))
+    head = next((p for p in parts if p), "")[:30]
+    for i, line in enumerate(body.split("\n")):
+        if head and head in normalize(line):
+            return section.line + 1 + i
+    return section.line
 
 
 def extract_with_llm(
@@ -229,7 +249,11 @@ def extract_with_llm(
         text = section_text(picked, task.with_tables) if picked else ""
         if not text:
             continue
-        output, problem = run_task(task, text, client)
+        try:
+            output, problem = run_task(task, text, client)
+        except LLMError as exc:
+            result.warnings.append(f"{task.name}: сбой вызова LLM, задача пропущена ({exc})")
+            continue
         if output is None:
             result.warnings.append(f"{problem} [{picked[0].heading[:40]}]")
             continue

@@ -217,6 +217,15 @@ def test_real_model_on_holdout() -> None:
 
 
 @pytest.mark.llm
+def test_real_model_on_blind() -> None:
+    """Третий набор: размечен до запуска модели и не использовался для настройки."""
+    from edu_doc_agent.llm import OpenAICompatibleClient
+
+    report = evaluate(OpenAICompatibleClient.from_settings(), BLIND_CASES)
+    assert report.passed(), report.summary()
+
+
+@pytest.mark.llm
 def test_real_model_on_blind2() -> None:
     """Четвёртый набор: размечен после правок выбора разделов и таблиц, до запуска модели."""
     from edu_doc_agent.llm import OpenAICompatibleClient

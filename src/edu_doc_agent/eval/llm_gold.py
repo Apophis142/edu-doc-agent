@@ -7,6 +7,7 @@
 """
 
 import json
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,8 +38,12 @@ _ITEMS = {"prerequisites": "items", "active_forms": "items", "grading_rules": "r
 _ATTRS = {
     "prerequisites": ("kind", "relation"),
     "active_forms": ("mandatory",),
-    "grading_rules": (),
+    "grading_rules": ("condition", "effect"),
 }
+# атрибуты (kind, relation, mandatory, смысл правил оценивания) входят в критерий прохождения:
+# верные ключи при перепутанных атрибутах — не успех. У правил оценивания смысл свободный
+# текст, сравнивается мягко (_same_meaning), поэтому порог ниже
+ATTR_THRESHOLDS = {"prerequisites": 0.8, "active_forms": 0.8, "grading_rules": 0.6}
 
 
 @dataclass
@@ -75,6 +80,23 @@ _STOP = {"и", "в", "на", "с", "по", "о", "об", "из", "при", "дл
 
 def _words(stem: str) -> set[str]:
     return {w for w in stem.split() if w not in _STOP}
+
+
+_NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?")
+
+
+def _same_meaning(a: str, b: str) -> bool:
+    """Условие/следствие свободным текстом: те же числа и от половины общих слов (по основам)."""
+    if set(_NUMBER_RE.findall(normalize(a))) != set(_NUMBER_RE.findall(normalize(b))):
+        return False
+    wa, wb = _words(_stem(a)), _words(_stem(b))
+    return bool(wa and wb) and len(wa & wb) / min(len(wa), len(wb)) >= 0.5
+
+
+def _attr_equal(task: str, attr: str, predicted: object, expected: object) -> bool:
+    if task == "grading_rules":
+        return _same_meaning(str(predicted), str(expected))
+    return predicted == expected
 
 
 def _match(task: str, pred: dict[tuple, dict], gold: dict[tuple, dict]) -> list[tuple]:
@@ -159,7 +181,7 @@ def score_case(task: str, predicted: dict, expected: dict) -> Score:
     for pk, gk in pairs:
         for attr in _ATTRS[task]:
             score.attr_total += 1
-            score.attr_ok += pred[pk][attr] == gold[gk][attr]
+            score.attr_ok += _attr_equal(task, attr, pred[pk][attr], gold[gk][attr])
     if task == "active_forms" and "total_hours" in expected:
         score.attr_total += 1
         score.attr_ok += predicted.get("total_hours") == expected["total_hours"]
@@ -174,7 +196,9 @@ class Report:
 
     def passed(self) -> bool:
         return not self.failures and all(
-            self.by_task[t].f1 >= th for t, th in THRESHOLDS.items() if t in self.by_task
+            self.by_task[t].f1 >= th and self.by_task[t].attribute_accuracy >= ATTR_THRESHOLDS[t]
+            for t, th in THRESHOLDS.items()
+            if t in self.by_task
         )
 
     def summary(self) -> str:

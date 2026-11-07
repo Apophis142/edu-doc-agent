@@ -85,14 +85,14 @@ def parse_tables(text: str) -> list[MdTable]:
 
 
 def table_row_text(line: str) -> str:
-    """Строка таблицы как обычный текст: ячейки через « | », без пустых и подряд повторённых
-    (так объединённая ячейка попадает в md несколько раз). Разделитель шапки даёт пустую строку."""
+    """Строка таблицы как обычный текст: непустые ячейки через « | ». Соседние одинаковые значения
+    не схлопываются: горизонтальное объединение парсер оставляет пустыми ячейками, а два равных
+    значения в разных столбцах законны. Разделитель шапки даёт пустую строку."""
     cells = split_row(line)
     if _is_separator(cells):
         return ""
     texts = [" ".join(clean_text(c).split()) for c in cells]
-    kept = [c for i, c in enumerate(texts) if c and (i == 0 or c != texts[i - 1])]
-    return " | ".join(kept)
+    return " | ".join(c for c in texts if c)
 
 
 def split_sections(text: str) -> list[MdSection]:

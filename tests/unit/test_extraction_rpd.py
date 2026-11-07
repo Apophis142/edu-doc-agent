@@ -639,7 +639,10 @@ def test_result_schema_fields_are_stable() -> None:
         "source",
     }
     outcome_fields = set(schema["$defs"]["LearningOutcome"]["properties"])
-    assert "competence_codes" in outcome_fields and "competence_code" not in outcome_fields
+    # схема описывает вывод model_dump(): вычисляемые поля (competence_code, total_hours) в ней
+    # есть, иначе JSON результата не проходит валидацию по собственной схеме
+    assert {"competence_codes", "competence_code"} <= outcome_fields
+    assert "total_hours" in schema["$defs"]["WorkloadRow"]["properties"]
     assert schema["additionalProperties"] is False
 
 

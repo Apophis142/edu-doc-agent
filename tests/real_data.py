@@ -5,7 +5,9 @@
 видят вывод актуальной версии `parsing/`, а не устаревшие md.
 """
 
+import atexit
 import os
+import shutil
 import tempfile
 import unicodedata
 from pathlib import Path
@@ -26,6 +28,7 @@ def _convert() -> list[Path]:
     if not docx:
         return []
     out = Path(tempfile.mkdtemp(prefix="edu_doc_agent_md_"))
+    atexit.register(shutil.rmtree, out, ignore_errors=True)
     result = []
     for path in docx:
         target = out / (unicodedata.normalize("NFC", path.stem) + ".md")
